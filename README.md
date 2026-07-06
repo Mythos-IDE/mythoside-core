@@ -1,7 +1,6 @@
 # MythosIDE
 
-[Read this in Turkish (Türkçe)](./README.TR.md)
-
+[![Language: TR](https://img.shields.io/badge/dil-T%C3%BCrk%C3%A7e-red)](./README.TR.md)
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](./LICENSE.md)
 [![GitHub Discussions](https://img.shields.io/github/discussions/Mythos-IDE/mythoside-core)](https://github.com/Mythos-IDE/mythoside-core/discussions)
 [![GitHub issues](https://img.shields.io/github/issues/Mythos-IDE/mythoside-core)](https://github.com/Mythos-IDE/mythoside-core/issues)
