@@ -50,8 +50,8 @@ the license above — see [LICENSE.md](./LICENSE.md) for details.
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
+See [CONTRIBUTING.md](https://github.com/Mythos-IDE/.github/blob/main/CONTRIBUTING.md) before opening a pull request.
 
 ## Security
 
-See [SECURITY.md](./SECURITY.md) for how to report vulnerabilities.
+See [SECURITY.md](https://github.com/Mythos-IDE/.github/blob/main/SECURITY.md) for how to report vulnerabilities.
