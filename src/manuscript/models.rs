@@ -1,0 +1,87 @@
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use std::collections::HashMap;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Series {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Book {
+    pub id: String,
+    pub series_id: String,
+    pub title: String,
+    pub synopsis: String,
+    pub order: u32,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Chapter {
+    pub id: String,
+    pub book_id: String,
+    pub title: String,
+    pub order: u32,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Scene {
+    pub id: String,
+    pub chapter_id: String,
+    pub title: String,
+    pub order: u32,
+    pub tags: Vec<String>,
+    pub characters: Vec<String>,
+    pub created_at: String,
+    pub content: String, // Markdown body
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Character {
+    pub id: String,
+    pub book_id: String,
+    pub name: String,
+    pub role: String,
+    pub attributes: HashMap<String, String>,
+    pub created_at: String,
+    pub bio: String, // Markdown body
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Location {
+    pub id: String,
+    pub book_id: String,
+    pub name: String,
+    pub created_at: String,
+    pub description: String, // Markdown body
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteType {
+    Lore,
+    Timeline,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Note {
+    pub id: String,
+    pub book_id: String,
+    pub title: String,
+    #[serde(rename = "type")]
+    pub note_type: NoteType,
+    pub created_at: String,
+    pub content: String, // Markdown body
+}

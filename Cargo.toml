@@ -1,0 +1,25 @@
+[package]
+name = "mythoside-core"
+version = "0.1.0"
+description = "MythosIDE local core server — manuscript data, file format, watching"
+edition = "2021"
+
+[lib]
+name = "mythoside_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mythoside-core"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_norway = "0.9.42"
+specta = { version = "2.0.0-rc.25", features = ["derive"] }
+uuid = { version = "1.23.5", features = ["serde", "v4"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+notify = "8.2.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"

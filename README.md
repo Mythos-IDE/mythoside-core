@@ -29,18 +29,47 @@ stitching together five different apps to keep their world consistent.
   cross-referencing and relationship queries ("which clan appears in Chapter
   4?") instant, without ever becoming the source of truth itself.
 
+## Repository layout
+
+MythosIDE is split into a local client and a local server, in two repos:
+
+- **This repo (`mythoside-core`)** — the engine. A standalone Rust crate
+  (library + binary) with no Tauri or UI dependency at all: the manuscript
+  data model, the Markdown+YAML file format, native filesystem watching, and
+  entity operations (create/read/update/delete a character, scene, etc.). It
+  runs as a small local server process, speaking a JSON-RPC-ish protocol over
+  its own stdin/stdout — never a network port, so nothing on the machine can
+  reach it but the process that spawned it.
+- [`mythoside-ts`](https://github.com/Mythos-IDE/mythoside-ts) — the desktop
+  client. A Tauri + TypeScript app that spawns this crate's binary as a
+  managed sidecar process and proxies to it. All UI, editor, and rendering
+  work happens there; this repo has none of it.
+
+Why two processes instead of one binary: it keeps the actual writing/parsing
+logic reusable and independently testable (`cargo test` here needs no UI, no
+Tauri, no window), and it means the local-first guarantee is structural, not
+just a promise — this crate never listens on a port, so there is no service
+here a browser tab or another local process could probe.
+
 ## Tech stack
 
-- [Tauri](https://tauri.app/) — lightweight, native-feeling cross-platform
-  desktop shell
-- TypeScript / Node.js
-- SQLite + FTS5 for local indexing
-- A customized web-based text editor (ProseMirror/Monaco-based)
+- Rust (this crate) — manuscript data model, Markdown+YAML parsing, file
+  watching (`notify`), JSON-RPC server
+- [Tauri](https://tauri.app/) + TypeScript ([`mythoside-ts`](https://github.com/Mythos-IDE/mythoside-ts)) — the desktop client
+- SQLite + FTS5 for local indexing (planned, not started)
+- A customized web-based text editor (ProseMirror/Monaco-based) (planned, in `mythoside-ts`)
 
 ## Getting started
 
-Setup instructions will land here as the project stabilizes. Track progress
-in [Issues](../../issues) and [Discussions](../../discussions).
+```bash
+cargo build   # builds the mythoside-core library + binary
+cargo test    # runs the format/watcher/RPC test suite
+```
+
+This crate is consumed as a dependency (and its binary bundled as a sidecar)
+by [`mythoside-ts`](https://github.com/Mythos-IDE/mythoside-ts) — that's
+where you'd actually run the app. Track progress in
+[Issues](../../issues) and [Discussions](../../discussions).
 
 ## License
 

@@ -19,16 +19,30 @@ MythosIDE; Scrivener gibi araçların yapılandırılmış, uzun soluklu yazma y
 - **Her zaman yerel öncelikli (Local-first)** — Gerçek bilgi kaynağı, diskinizdeki düz Markdown + YAML üst verileridir (frontmatter). Platforma bağımlılık veya "bu şirket kapanırsa romanıma ne olur?" endişesi yoktur.
 - **Arka planda hızlı çalışır** — Yerel bir SQLite (FTS5) indeksi, çapraz referansları ve ilişki sorgularını ("Hangi klan Bölüm 4'te görünüyor?") hiçbir zaman ana bilgi kaynağı kaynağı haline gelmeden anında gerçekleştirir.
 
+## Repo Yapısı
+
+MythosIDE, biri yerel client biri yerel sunucu olan iki ayrı repo'ya bölünmüştür:
+
+- **Bu repo (`mythoside-core`)** — motor katmanı. Hiçbir Tauri veya arayüz bağımlılığı olmayan bağımsız bir Rust crate'i (kütüphane + binary): elyazması veri modeli, Markdown+YAML dosya formatı, native dosya izleme, ve entity işlemleri (karakter/sahne vb. oluşturma/okuma/güncelleme/silme). Kendi stdin/stdout'u üzerinden JSON-RPC benzeri bir protokol konuşan küçük bir yerel sunucu process'i olarak çalışır — asla bir ağ portu açmaz, bu yüzden kendisini başlatan process dışında makinedeki hiçbir şey ona erişemez.
+- [`mythoside-ts`](https://github.com/Mythos-IDE/mythoside-ts) — masaüstü client'ı. Bu crate'in binary'sini yönetilen bir "sidecar" process olarak başlatan ve ona proxy yapan bir Tauri + TypeScript uygulaması. Tüm arayüz, editör ve render işi orada gerçekleşir; bu repo'da hiçbiri yok.
+
+Neden tek binary yerine iki process: gerçek yazma/parse mantığını yeniden kullanılabilir ve bağımsız test edilebilir tutar (buradaki `cargo test` arayüz, Tauri veya pencere gerektirmez), ve local-first garantisini sadece bir vaat değil yapısal bir gerçek haline getirir — bu crate asla bir port dinlemez, yani bir tarayıcı sekmesinin ya da başka bir yerel process'in araştırabileceği bir servis burada yoktur.
+
 ## Teknoloji Yığını
 
-- [Tauri](https://tauri.app/) — Hafif, yerel uygulama hissi veren çapraz platform masaüstü kabuğu.
-- TypeScript / Node.js
-- Yerel indeksleme için SQLite + FTS5
-- Özelleştirilmiş web tabanlı metin editörü (ProseMirror/Monaco tabanlı)
+- Rust (bu crate) — elyazması veri modeli, Markdown+YAML ayrıştırma, dosya izleme (`notify`), JSON-RPC sunucusu
+- [Tauri](https://tauri.app/) + TypeScript ([`mythoside-ts`](https://github.com/Mythos-IDE/mythoside-ts)) — masaüstü client'ı
+- Yerel indeksleme için SQLite + FTS5 (planlandı, henüz başlanmadı)
+- Özelleştirilmiş web tabanlı metin editörü (ProseMirror/Monaco tabanlı) (planlandı, `mythoside-ts`'de)
 
 ## Başlarken
 
-Proje stabilize edildikçe kurulum talimatları buraya eklenecektir. Gelişmeleri [Issues](../../issues) ve [Discussions](../../discussions) üzerinden takip edebilirsiniz.
+```bash
+cargo build   # mythoside-core kütüphanesini + binary'sini derler
+cargo test    # format/watcher/RPC test paketini çalıştırır
+```
+
+Bu crate, [`mythoside-ts`](https://github.com/Mythos-IDE/mythoside-ts) tarafından bir bağımlılık olarak kullanılır (ve binary'si bir sidecar olarak paketlenir) — uygulamayı fiilen orada çalıştırırsınız. Gelişmeleri [Issues](../../issues) ve [Discussions](../../discussions) üzerinden takip edebilirsiniz.
 
 ## Lisans
 
