@@ -4,6 +4,14 @@ version = "0.1.0"
 description = "MythosIDE local core server — manuscript data, file format, watching"
 edition = "2021"
 
+# Empty table: marks this crate as its own workspace root regardless of
+# where it's checked out. Without this, Cargo walks up from wherever this
+# repo is cloned looking for a workspace-owning Cargo.toml — if it happens
+# to be nested inside another Cargo workspace (e.g. mythoside-ts's build
+# script clones it into its own tree to build the sidecar binary), Cargo
+# tries to fold this crate into that unrelated workspace and fails.
+[workspace]
+
 [lib]
 name = "mythoside_core"
 path = "src/lib.rs"
