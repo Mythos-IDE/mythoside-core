@@ -1,4 +1,4 @@
-use crate::manuscript::commands::{self, CreateCharacterInput};
+use crate::manuscript::commands::{self, CreateCharacterInput, CreateSeriesInput};
 use crate::watcher::{self, FileChangeEvent, WatcherState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -78,8 +78,15 @@ impl Notifier {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct StartWatchingParams {
     path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetSeriesParams {
+    project_dir: String,
 }
 
 /// Routes one request's `(method, params)` to the matching handler. Kept
@@ -98,6 +105,18 @@ pub fn dispatch(
                 serde_json::from_value(params).map_err(|e| e.to_string())?;
             let character = commands::create_character(input)?;
             serde_json::to_value(character).map_err(|e| e.to_string())
+        }
+        "create_series" => {
+            let input: CreateSeriesInput =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let series = commands::create_series(input)?;
+            serde_json::to_value(series).map_err(|e| e.to_string())
+        }
+        "get_series" => {
+            let GetSeriesParams { project_dir } =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let series = commands::get_series(&project_dir)?;
+            serde_json::to_value(series).map_err(|e| e.to_string())
         }
         "start_watching" => {
             let StartWatchingParams { path } =
@@ -138,6 +157,27 @@ mod tests {
             .expect("create_character should succeed");
         assert_eq!(result["name"], "Lyra Vance");
         assert!(result["id"].as_str().is_some_and(|s| !s.is_empty()));
+    }
+
+    #[test]
+    fn dispatches_create_series_then_get_series() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "title": "The Aethelgard Chronicles",
+            "description": "An epic fantasy series.",
+        });
+        let created = dispatch("create_series", create_params, &watcher_state, &notifier)
+            .expect("create_series should succeed");
+        assert_eq!(created["title"], "The Aethelgard Chronicles");
+
+        let get_params = json!({ "projectDir": dir.path().to_string_lossy() });
+        let fetched = dispatch("get_series", get_params, &watcher_state, &notifier)
+            .expect("get_series should succeed");
+        assert_eq!(fetched, created);
     }
 
     #[test]

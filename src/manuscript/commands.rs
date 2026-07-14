@@ -1,5 +1,5 @@
 use super::format;
-use super::models::Character;
+use super::models::{Character, Series};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -73,6 +73,43 @@ pub fn create_character(input: CreateCharacterInput) -> Result<Character, String
     Ok(character)
 }
 
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSeriesInput {
+    /// Filesystem path to the project root — `series.yaml` is written
+    /// directly there (a project root *is* a series, per the folder
+    /// convention: `<project_dir>/series.yaml`, `<project_dir>/<book-slug>/
+    /// book.yaml`, etc.).
+    pub project_dir: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+pub fn create_series(input: CreateSeriesInput) -> Result<Series, String> {
+    let series = Series {
+        id: Uuid::new_v4().to_string(),
+        title: input.title,
+        description: input.description,
+        created_at: now_iso8601(),
+    };
+
+    let project_dir = Path::new(&input.project_dir);
+    fs::create_dir_all(project_dir).map_err(|e| e.to_string())?;
+
+    let contents = format::serialize_series(&series)?;
+    fs::write(project_dir.join("series.yaml"), contents).map_err(|e| e.to_string())?;
+
+    Ok(series)
+}
+
+pub fn get_series(project_dir: &str) -> Result<Series, String> {
+    let file_path = Path::new(project_dir).join("series.yaml");
+    let contents = fs::read_to_string(&file_path)
+        .map_err(|e| format!("could not read {}: {e}", file_path.display()))?;
+    format::parse_series(&contents)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +143,42 @@ mod tests {
         let written = fs::read_to_string(entries[0].as_ref().unwrap().path()).unwrap();
         let parsed = format::parse_character(&written).unwrap();
         assert_eq!(parsed, character);
+    }
+
+    #[test]
+    fn creates_a_series_yaml_at_the_project_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = CreateSeriesInput {
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            title: "The Aethelgard Chronicles".into(),
+            description: "An epic fantasy series.".into(),
+        };
+
+        let series = create_series(input).expect("should create the series");
+        assert_eq!(series.title, "The Aethelgard Chronicles");
+        assert!(!series.id.is_empty());
+
+        let written = fs::read_to_string(dir.path().join("series.yaml")).unwrap();
+        assert_eq!(format::parse_series(&written).unwrap(), series);
+    }
+
+    #[test]
+    fn gets_a_previously_created_series() {
+        let dir = tempfile::tempdir().unwrap();
+        let created = create_series(CreateSeriesInput {
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            title: "The Aethelgard Chronicles".into(),
+            description: "".into(),
+        })
+        .unwrap();
+
+        let fetched = get_series(&dir.path().to_string_lossy()).expect("should read the series");
+        assert_eq!(fetched, created);
+    }
+
+    #[test]
+    fn get_series_fails_when_series_yaml_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(get_series(&dir.path().to_string_lossy()).is_err());
     }
 }
