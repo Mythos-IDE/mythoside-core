@@ -160,24 +160,29 @@ mod tests {
     }
 
     #[test]
-    fn dispatches_create_series_then_get_series() {
+    fn dispatches_get_series_for_a_previously_created_series() {
+        // Seeds the fixture via `create_series_in` directly rather than
+        // dispatching "create_series" — that method resolves the real OS
+        // Documents directory (see its doc comment), which a test must
+        // never write into.
         let dir = tempfile::tempdir().unwrap();
         let watcher_state = WatcherState::default();
         let notifier = Notifier::default();
 
-        let create_params = json!({
-            "projectDir": dir.path().to_string_lossy(),
-            "title": "The Aethelgard Chronicles",
-            "description": "An epic fantasy series.",
-        });
-        let created = dispatch("create_series", create_params, &watcher_state, &notifier)
-            .expect("create_series should succeed");
-        assert_eq!(created["title"], "The Aethelgard Chronicles");
+        let created = commands::create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "An epic fantasy series.".into(),
+            },
+        )
+        .expect("should create the series fixture");
 
-        let get_params = json!({ "projectDir": dir.path().to_string_lossy() });
+        let get_params = json!({ "projectDir": created.project_dir });
         let fetched = dispatch("get_series", get_params, &watcher_state, &notifier)
             .expect("get_series should succeed");
-        assert_eq!(fetched, created);
+        assert_eq!(fetched["title"], "The Aethelgard Chronicles");
+        assert_eq!(fetched["id"], created.series.id);
     }
 
     #[test]

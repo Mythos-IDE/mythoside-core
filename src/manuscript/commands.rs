@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// ISO-8601/RFC-3339 timestamp — used instead of a raw epoch number so the
@@ -76,31 +76,69 @@ pub fn create_character(input: CreateCharacterInput) -> Result<Character, String
 #[derive(Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSeriesInput {
-    /// Filesystem path to the project root — `series.yaml` is written
-    /// directly there (a project root *is* a series, per the folder
-    /// convention: `<project_dir>/series.yaml`, `<project_dir>/<book-slug>/
-    /// book.yaml`, etc.).
-    pub project_dir: String,
     pub title: String,
     #[serde(default)]
     pub description: String,
 }
 
-pub fn create_series(input: CreateSeriesInput) -> Result<Series, String> {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSeriesOutput {
+    pub series: Series,
+    /// Where `series.yaml` actually landed — the caller (a UI, eventually a
+    /// "recent projects" list) needs this to read the series back later via
+    /// `get_series`. Nothing asked the user to type or pick this; see
+    /// `create_series`.
+    pub project_dir: String,
+}
+
+/// Cross-platform "Documents" directory (`~/Documents` on macOS/Windows,
+/// XDG-aware on Linux via the `dirs` crate — not Tauri-specific, this crate
+/// has no Tauri dependency). New series live in a `MythosIDE/` subfolder
+/// there by default, named from a slug of the title, so nobody has to type
+/// or pick a filesystem path just to start writing — a relative path typed
+/// into a UI resolves against whatever directory the *process* happens to
+/// be running from, which is a footgun (hit this exact confusion once: a
+/// dev-mode test run put a series inside `src-tauri/` because that's where
+/// `cargo run` executes from).
+fn resolve_documents_dir() -> Result<PathBuf, String> {
+    dirs::document_dir().ok_or_else(|| "could not determine the Documents directory".to_string())
+}
+
+/// Crate-visible (not private) so `rpc.rs`'s tests can seed a fixture
+/// series without going through the public `create_series`, which resolves
+/// the *real* OS Documents directory — a dispatch-level test calling that
+/// would write throwaway folders into the developer's actual `~/Documents`
+/// on every `cargo test` run.
+pub(crate) fn create_series_in(
+    base_dir: &Path,
+    input: CreateSeriesInput,
+) -> Result<CreateSeriesOutput, String> {
+    let id = Uuid::new_v4().to_string();
+    // Short id suffix keeps folder names unique even if two series share a title.
+    let slug = format!("{}-{}", slugify(&input.title), &id[..8]);
+    let project_dir = base_dir.join("MythosIDE").join(&slug);
+
     let series = Series {
-        id: Uuid::new_v4().to_string(),
+        id,
         title: input.title,
         description: input.description,
         created_at: now_iso8601(),
     };
 
-    let project_dir = Path::new(&input.project_dir);
-    fs::create_dir_all(project_dir).map_err(|e| e.to_string())?;
-
+    fs::create_dir_all(&project_dir).map_err(|e| e.to_string())?;
     let contents = format::serialize_series(&series)?;
     fs::write(project_dir.join("series.yaml"), contents).map_err(|e| e.to_string())?;
 
-    Ok(series)
+    Ok(CreateSeriesOutput {
+        series,
+        project_dir: project_dir.to_string_lossy().into_owned(),
+    })
+}
+
+pub fn create_series(input: CreateSeriesInput) -> Result<CreateSeriesOutput, String> {
+    let documents_dir = resolve_documents_dir()?;
+    create_series_in(&documents_dir, input)
 }
 
 pub fn get_series(project_dir: &str) -> Result<Series, String> {
@@ -146,34 +184,37 @@ mod tests {
     }
 
     #[test]
-    fn creates_a_series_yaml_at_the_project_root() {
+    fn creates_a_series_yaml_under_a_slugified_subfolder() {
         let dir = tempfile::tempdir().unwrap();
         let input = CreateSeriesInput {
-            project_dir: dir.path().to_string_lossy().into_owned(),
             title: "The Aethelgard Chronicles".into(),
             description: "An epic fantasy series.".into(),
         };
 
-        let series = create_series(input).expect("should create the series");
-        assert_eq!(series.title, "The Aethelgard Chronicles");
-        assert!(!series.id.is_empty());
+        let output = create_series_in(dir.path(), input).expect("should create the series");
+        assert_eq!(output.series.title, "The Aethelgard Chronicles");
+        assert!(!output.series.id.is_empty());
+        assert!(output.project_dir.contains("the-aethelgard-chronicles"));
 
-        let written = fs::read_to_string(dir.path().join("series.yaml")).unwrap();
-        assert_eq!(format::parse_series(&written).unwrap(), series);
+        let written =
+            fs::read_to_string(Path::new(&output.project_dir).join("series.yaml")).unwrap();
+        assert_eq!(format::parse_series(&written).unwrap(), output.series);
     }
 
     #[test]
     fn gets_a_previously_created_series() {
         let dir = tempfile::tempdir().unwrap();
-        let created = create_series(CreateSeriesInput {
-            project_dir: dir.path().to_string_lossy().into_owned(),
-            title: "The Aethelgard Chronicles".into(),
-            description: "".into(),
-        })
+        let created = create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
         .unwrap();
 
-        let fetched = get_series(&dir.path().to_string_lossy()).expect("should read the series");
-        assert_eq!(fetched, created);
+        let fetched = get_series(&created.project_dir).expect("should read the series");
+        assert_eq!(fetched, created.series);
     }
 
     #[test]
