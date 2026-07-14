@@ -131,6 +131,13 @@ pub fn dispatch(
             let series = commands::get_series(&project_dir)?;
             serde_json::to_value(series).map_err(|e| e.to_string())
         }
+        "list_series" => {
+            // No params — resolves the same real Documents dir create_series
+            // writes into, so (like "create_series") this isn't covered by a
+            // dispatch-level test; see list_series_in's own unit tests.
+            let series = commands::list_series()?;
+            serde_json::to_value(series).map_err(|e| e.to_string())
+        }
         "update_series" => {
             let input: UpdateSeriesInput =
                 serde_json::from_value(params).map_err(|e| e.to_string())?;

@@ -290,6 +290,56 @@ pub fn create_series(input: CreateSeriesInput) -> Result<CreateSeriesOutput, Str
     create_series_in(&documents_dir, input)
 }
 
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSeriesOutput {
+    /// Reuses `CreateSeriesOutput`'s `{series, project_dir}` pairing rather
+    /// than inventing an identically-shaped struct — every caller that
+    /// needs to open a series already needs both fields together.
+    pub series: Vec<CreateSeriesOutput>,
+    pub warnings: Vec<String>,
+}
+
+/// Crate-visible for the same reason as `create_series_in`: a test must
+/// never scan (or write into) the developer's real `~/Documents`.
+pub(crate) fn list_series_in(base_dir: &Path) -> ListSeriesOutput {
+    let mythoside_dir = base_dir.join("MythosIDE");
+    let mut series = Vec::new();
+    let mut warnings = Vec::new();
+
+    let Ok(entries) = fs::read_dir(&mythoside_dir) else {
+        return ListSeriesOutput { series, warnings }; // nothing created yet, not an error
+    };
+    for entry in entries.flatten() {
+        let project_dir = entry.path();
+        let series_yaml = project_dir.join("series.yaml");
+        if !series_yaml.is_file() {
+            continue;
+        }
+        match fs::read_to_string(&series_yaml)
+            .map_err(|e| e.to_string())
+            .and_then(|text| format::parse_series(&text))
+        {
+            Ok(parsed) => series.push(CreateSeriesOutput {
+                series: parsed,
+                project_dir: project_dir.to_string_lossy().into_owned(),
+            }),
+            Err(e) => warnings.push(format!("{}: {e}", series_yaml.display())),
+        }
+    }
+
+    ListSeriesOutput { series, warnings }
+}
+
+/// Every series a user has created, so the app can offer "open an existing
+/// series" instead of only ever starting a new one. Takes no path — same
+/// reasoning as `create_series`, this just re-scans the same Documents
+/// folder `create_series` writes into.
+pub fn list_series() -> Result<ListSeriesOutput, String> {
+    let documents_dir = resolve_documents_dir()?;
+    Ok(list_series_in(&documents_dir))
+}
+
 pub fn get_series(project_dir: &str) -> Result<Series, String> {
     let file_path = Path::new(project_dir).join("series.yaml");
     let contents = fs::read_to_string(&file_path)
@@ -498,6 +548,76 @@ mod tests {
     fn get_series_fails_when_series_yaml_is_missing() {
         let dir = tempfile::tempdir().unwrap();
         assert!(get_series(&dir.path().to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn list_series_is_empty_when_none_created_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = list_series_in(dir.path());
+        assert!(result.series.is_empty());
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn lists_every_series_created_under_the_base_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+        create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Silverwood Saga".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+
+        let result = list_series_in(dir.path());
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.series.len(), 2);
+        let titles: Vec<_> = result
+            .series
+            .iter()
+            .map(|s| s.series.title.clone())
+            .collect();
+        assert!(titles.contains(&"The Aethelgard Chronicles".to_string()));
+        assert!(titles.contains(&"The Silverwood Saga".to_string()));
+    }
+
+    #[test]
+    fn list_series_collects_a_warning_for_an_unparseable_series_yaml_instead_of_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+
+        let broken_dir = dir.path().join("MythosIDE").join("broken-series");
+        fs::create_dir_all(&broken_dir).unwrap();
+        fs::write(
+            broken_dir.join("series.yaml"),
+            "not: valid: series: yaml: at: all",
+        )
+        .unwrap();
+
+        let result = list_series_in(dir.path());
+        assert_eq!(
+            result.series.len(),
+            1,
+            "the good series should still show up"
+        );
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("broken-series"));
     }
 
     #[test]
