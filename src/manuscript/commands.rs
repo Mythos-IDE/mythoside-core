@@ -1,5 +1,5 @@
 use super::format;
-use super::models::{Character, Series};
+use super::models::{Book, Character, Location, Note, NoteType, Series};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -71,6 +71,155 @@ pub fn create_character(input: CreateCharacterInput) -> Result<Character, String
     fs::write(&file_path, contents).map_err(|e| e.to_string())?;
 
     Ok(character)
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListCharactersOutput {
+    pub characters: Vec<Character>,
+    pub warnings: Vec<String>,
+}
+
+/// Scans `dir` for files with the given extension (no leading dot, e.g.
+/// `"md"`), parsing each with `parse`. A file that fails to parse becomes a
+/// `"<path>: <error>"` warning instead of failing the whole scan — one
+/// corrupt/hand-edited file shouldn't hide every other entity in a list
+/// view. A missing directory (nothing created yet) yields an empty result,
+/// not a warning. Shared by list_characters/list_locations/list_notes;
+/// list_books scans subdirectories for a fixed filename instead, a
+/// different enough shape to not fit this helper.
+fn scan_entities<T>(
+    dir: &Path,
+    extension: &str,
+    parse: impl Fn(&str) -> Result<T, String>,
+) -> (Vec<T>, Vec<String>) {
+    let mut items = Vec::new();
+    let mut warnings = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return (items, warnings);
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some(extension) {
+            continue;
+        }
+        match fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| parse(&text))
+        {
+            Ok(item) => items.push(item),
+            Err(e) => warnings.push(format!("{}: {e}", path.display())),
+        }
+    }
+    (items, warnings)
+}
+
+pub fn list_characters(book_dir: &str) -> Result<ListCharactersOutput, String> {
+    let characters_dir = Path::new(book_dir).join("characters");
+    let (characters, warnings) = scan_entities(&characters_dir, "md", format::parse_character);
+    Ok(ListCharactersOutput {
+        characters,
+        warnings,
+    })
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateLocationInput {
+    pub book_dir: String,
+    pub book_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+pub fn create_location(input: CreateLocationInput) -> Result<Location, String> {
+    let id = Uuid::new_v4().to_string();
+    let location = Location {
+        id: id.clone(),
+        book_id: input.book_id,
+        name: input.name.clone(),
+        created_at: now_iso8601(),
+        description: input.description,
+    };
+
+    let locations_dir = Path::new(&input.book_dir).join("locations");
+    fs::create_dir_all(&locations_dir).map_err(|e| e.to_string())?;
+
+    // Short id suffix keeps filenames unique even if two locations share a name.
+    let slug = format!("{}-{}", slugify(&input.name), &id[..8]);
+    let file_path = locations_dir.join(format!("{slug}.md"));
+    let contents = format::serialize_location(&location)?;
+    fs::write(&file_path, contents).map_err(|e| e.to_string())?;
+
+    Ok(location)
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListLocationsOutput {
+    pub locations: Vec<Location>,
+    pub warnings: Vec<String>,
+}
+
+pub fn list_locations(book_dir: &str) -> Result<ListLocationsOutput, String> {
+    let locations_dir = Path::new(book_dir).join("locations");
+    let (locations, warnings) = scan_entities(&locations_dir, "md", format::parse_location);
+    Ok(ListLocationsOutput {
+        locations,
+        warnings,
+    })
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateNoteInput {
+    pub book_dir: String,
+    pub book_id: String,
+    pub title: String,
+    // `Note` itself wire-renames this field to `type` (models.rs) — matched
+    // here on purpose so TS sees `input.type`/`note.type` consistently
+    // instead of `input.noteType`/`note.type`.
+    #[serde(rename = "type")]
+    pub note_type: NoteType,
+    #[serde(default)]
+    pub content: String,
+}
+
+pub fn create_note(input: CreateNoteInput) -> Result<Note, String> {
+    let id = Uuid::new_v4().to_string();
+    let note = Note {
+        id: id.clone(),
+        book_id: input.book_id,
+        title: input.title.clone(),
+        note_type: input.note_type,
+        created_at: now_iso8601(),
+        content: input.content,
+    };
+
+    let notes_dir = Path::new(&input.book_dir).join("notes");
+    fs::create_dir_all(&notes_dir).map_err(|e| e.to_string())?;
+
+    // Short id suffix keeps filenames unique even if two notes share a title.
+    let slug = format!("{}-{}", slugify(&input.title), &id[..8]);
+    let file_path = notes_dir.join(format!("{slug}.md"));
+    let contents = format::serialize_note(&note)?;
+    fs::write(&file_path, contents).map_err(|e| e.to_string())?;
+
+    Ok(note)
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListNotesOutput {
+    pub notes: Vec<Note>,
+    pub warnings: Vec<String>,
+}
+
+pub fn list_notes(book_dir: &str) -> Result<ListNotesOutput, String> {
+    let notes_dir = Path::new(book_dir).join("notes");
+    let (notes, warnings) = scan_entities(&notes_dir, "md", format::parse_note);
+    Ok(ListNotesOutput { notes, warnings })
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -148,6 +297,134 @@ pub fn get_series(project_dir: &str) -> Result<Series, String> {
     format::parse_series(&contents)
 }
 
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSeriesInput {
+    pub project_dir: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Full replace, not a patch — `id`/`created_at` are read back from the
+/// existing `series.yaml` and preserved, everything else is overwritten.
+pub fn update_series(input: UpdateSeriesInput) -> Result<Series, String> {
+    let mut series = get_series(&input.project_dir)?;
+    series.title = input.title;
+    series.description = input.description;
+
+    let contents = format::serialize_series(&series)?;
+    fs::write(Path::new(&input.project_dir).join("series.yaml"), contents)
+        .map_err(|e| e.to_string())?;
+
+    Ok(series)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BookHandle {
+    pub book: Book,
+    /// Where `book.yaml` actually landed — mirrors `CreateSeriesOutput`'s
+    /// `project_dir` pairing. Character/Location/Note all key off a book,
+    /// not a series (see their `book_id`/`book_dir` fields), so callers need
+    /// this to create any of those under the returned book.
+    pub book_dir: String,
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBookInput {
+    pub project_dir: String,
+    pub series_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub synopsis: String,
+}
+
+/// Counts existing `<project_dir>/*/book.yaml` folders to assign the next
+/// `order` automatically, the same "don't make the user supply what the
+/// system can compute" call as `create_series`'s path resolution.
+///
+/// NOTE: if a `delete_book` command is ever added, two books could collide
+/// on `order` after a delete-then-recreate. Not solved here — there's no
+/// delete in scope yet, and it's cheap to revisit once there is.
+fn next_book_order(project_dir: &Path) -> u32 {
+    let Ok(entries) = fs::read_dir(project_dir) else {
+        return 1;
+    };
+    let existing = entries
+        .flatten()
+        .filter(|entry| entry.path().join("book.yaml").is_file())
+        .count();
+    existing as u32 + 1
+}
+
+pub fn create_book(input: CreateBookInput) -> Result<BookHandle, String> {
+    let id = Uuid::new_v4().to_string();
+    let project_dir = Path::new(&input.project_dir);
+    let order = next_book_order(project_dir);
+
+    // Short id suffix keeps folder names unique even if two books share a title.
+    let slug = format!("{}-{}", slugify(&input.title), &id[..8]);
+    let book_dir = project_dir.join(&slug);
+
+    let book = Book {
+        id,
+        series_id: input.series_id,
+        title: input.title,
+        synopsis: input.synopsis,
+        order,
+        created_at: now_iso8601(),
+    };
+
+    fs::create_dir_all(&book_dir).map_err(|e| e.to_string())?;
+    let contents = format::serialize_book(&book)?;
+    fs::write(book_dir.join("book.yaml"), contents).map_err(|e| e.to_string())?;
+
+    Ok(BookHandle {
+        book,
+        book_dir: book_dir.to_string_lossy().into_owned(),
+    })
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ListBooksOutput {
+    pub books: Vec<BookHandle>,
+    /// `"<path>: <parse error>"` per book.yaml that failed to parse — one
+    /// corrupt/hand-edited book shouldn't hide every other book from the
+    /// dashboard, but it also shouldn't silently vanish with no trace.
+    pub warnings: Vec<String>,
+}
+
+pub fn list_books(project_dir: &str) -> Result<ListBooksOutput, String> {
+    let project_dir = Path::new(project_dir);
+    let entries = fs::read_dir(project_dir).map_err(|e| e.to_string())?;
+
+    let mut books = Vec::new();
+    let mut warnings = Vec::new();
+    for entry in entries.flatten() {
+        let book_dir = entry.path();
+        let book_yaml = book_dir.join("book.yaml");
+        if !book_yaml.is_file() {
+            continue;
+        }
+        match fs::read_to_string(&book_yaml)
+            .map_err(|e| e.to_string())
+            .and_then(|text| format::parse_book(&text))
+        {
+            Ok(book) => books.push(BookHandle {
+                book,
+                book_dir: book_dir.to_string_lossy().into_owned(),
+            }),
+            Err(e) => warnings.push(format!("{}: {e}", book_yaml.display())),
+        }
+    }
+    books.sort_by_key(|handle| handle.book.order);
+
+    Ok(ListBooksOutput { books, warnings })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +498,234 @@ mod tests {
     fn get_series_fails_when_series_yaml_is_missing() {
         let dir = tempfile::tempdir().unwrap();
         assert!(get_series(&dir.path().to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn updates_a_series_title_and_description_but_keeps_id_and_created_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let created = create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "Original description.".into(),
+            },
+        )
+        .unwrap();
+
+        let updated = update_series(UpdateSeriesInput {
+            project_dir: created.project_dir.clone(),
+            title: "The Aethelgard Chronicles: Revised".into(),
+            description: "Updated description.".into(),
+        })
+        .expect("should update the series");
+
+        assert_eq!(updated.id, created.series.id);
+        assert_eq!(updated.created_at, created.series.created_at);
+        assert_eq!(updated.title, "The Aethelgard Chronicles: Revised");
+        assert_eq!(updated.description, "Updated description.");
+
+        let fetched = get_series(&created.project_dir).unwrap();
+        assert_eq!(fetched, updated);
+    }
+
+    #[test]
+    fn creates_a_book_with_auto_assigned_order_and_slugified_subfolder() {
+        let dir = tempfile::tempdir().unwrap();
+        let handle = create_book(CreateBookInput {
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            series_id: "series-1".into(),
+            title: "Shadow of the Void".into(),
+            synopsis: "The first book.".into(),
+        })
+        .expect("should create the book");
+
+        assert_eq!(handle.book.order, 1);
+        assert!(handle.book_dir.contains("shadow-of-the-void"));
+
+        let written = fs::read_to_string(Path::new(&handle.book_dir).join("book.yaml")).unwrap();
+        assert_eq!(format::parse_book(&written).unwrap(), handle.book);
+    }
+
+    #[test]
+    fn create_book_increments_order_for_each_new_book() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = |title: &str| CreateBookInput {
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            series_id: "series-1".into(),
+            title: title.into(),
+            synopsis: "".into(),
+        };
+
+        let first = create_book(input("Shadow of the Void")).unwrap();
+        let second = create_book(input("The Obsidian Gate")).unwrap();
+
+        assert_eq!(first.book.order, 1);
+        assert_eq!(second.book.order, 2);
+    }
+
+    #[test]
+    fn lists_books_sorted_by_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = |title: &str| CreateBookInput {
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            series_id: "series-1".into(),
+            title: title.into(),
+            synopsis: "".into(),
+        };
+        create_book(input("Shadow of the Void")).unwrap();
+        create_book(input("The Obsidian Gate")).unwrap();
+
+        let result = list_books(&dir.path().to_string_lossy()).expect("should list books");
+
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.books.len(), 2);
+        assert_eq!(result.books[0].book.title, "Shadow of the Void");
+        assert_eq!(result.books[1].book.title, "The Obsidian Gate");
+    }
+
+    #[test]
+    fn creates_a_location_file_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = create_location(CreateLocationInput {
+            book_dir: dir.path().to_string_lossy().into_owned(),
+            book_id: "book-1".into(),
+            name: "Aethelgard".into(),
+            description: "The last free city.".into(),
+        })
+        .expect("should create the location");
+
+        assert_eq!(location.name, "Aethelgard");
+
+        let locations_dir = dir.path().join("locations");
+        let entries: Vec<_> = fs::read_dir(&locations_dir).unwrap().collect();
+        assert_eq!(entries.len(), 1, "expected exactly one location file");
+
+        let written = fs::read_to_string(entries[0].as_ref().unwrap().path()).unwrap();
+        assert_eq!(format::parse_location(&written).unwrap(), location);
+    }
+
+    #[test]
+    fn lists_locations_for_a_book() {
+        let dir = tempfile::tempdir().unwrap();
+        let book_dir = dir.path().to_string_lossy().into_owned();
+        create_location(CreateLocationInput {
+            book_dir: book_dir.clone(),
+            book_id: "book-1".into(),
+            name: "Aethelgard".into(),
+            description: "The last free city.".into(),
+        })
+        .unwrap();
+
+        let result = list_locations(&book_dir).expect("should list locations");
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.locations.len(), 1);
+        assert_eq!(result.locations[0].name, "Aethelgard");
+    }
+
+    #[test]
+    fn list_locations_is_empty_when_the_book_has_none_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = list_locations(&dir.path().to_string_lossy()).expect("should not fail");
+        assert!(result.locations.is_empty());
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn lists_characters_for_a_book() {
+        let dir = tempfile::tempdir().unwrap();
+        let book_dir = dir.path().to_string_lossy().into_owned();
+        create_character(CreateCharacterInput {
+            book_dir: book_dir.clone(),
+            book_id: "book-1".into(),
+            name: "Lyra Vance".into(),
+            role: "Protagonist".into(),
+            bio: "".into(),
+            attributes: HashMap::new(),
+        })
+        .unwrap();
+
+        let result = list_characters(&book_dir).expect("should list characters");
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.characters.len(), 1);
+        assert_eq!(result.characters[0].name, "Lyra Vance");
+    }
+
+    #[test]
+    fn creates_a_timeline_note_file_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let note = create_note(CreateNoteInput {
+            book_dir: dir.path().to_string_lossy().into_owned(),
+            book_id: "book-1".into(),
+            title: "The Sealing".into(),
+            note_type: NoteType::Timeline,
+            content: "Year 0 of the Third Age.".into(),
+        })
+        .expect("should create the note");
+
+        assert_eq!(note.note_type, NoteType::Timeline);
+
+        let notes_dir = dir.path().join("notes");
+        let entries: Vec<_> = fs::read_dir(&notes_dir).unwrap().collect();
+        assert_eq!(entries.len(), 1, "expected exactly one note file");
+
+        let written = fs::read_to_string(entries[0].as_ref().unwrap().path()).unwrap();
+        assert_eq!(format::parse_note(&written).unwrap(), note);
+    }
+
+    #[test]
+    fn lists_notes_of_both_types_for_a_book() {
+        let dir = tempfile::tempdir().unwrap();
+        let book_dir = dir.path().to_string_lossy().into_owned();
+        create_note(CreateNoteInput {
+            book_dir: book_dir.clone(),
+            book_id: "book-1".into(),
+            title: "The Sealing".into(),
+            note_type: NoteType::Timeline,
+            content: "Year 0.".into(),
+        })
+        .unwrap();
+        create_note(CreateNoteInput {
+            book_dir: book_dir.clone(),
+            book_id: "book-1".into(),
+            title: "The Void Walker Prophecy".into(),
+            note_type: NoteType::Lore,
+            content: "Long ago...".into(),
+        })
+        .unwrap();
+
+        let result = list_notes(&book_dir).expect("should list notes");
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.notes.len(), 2);
+        assert!(result
+            .notes
+            .iter()
+            .any(|n| n.note_type == NoteType::Timeline));
+        assert!(result.notes.iter().any(|n| n.note_type == NoteType::Lore));
+    }
+
+    #[test]
+    fn list_books_collects_a_warning_for_an_unparseable_book_yaml_instead_of_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        create_book(CreateBookInput {
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            series_id: "series-1".into(),
+            title: "Shadow of the Void".into(),
+            synopsis: "".into(),
+        })
+        .unwrap();
+
+        let broken_dir = dir.path().join("broken-book");
+        fs::create_dir_all(&broken_dir).unwrap();
+        fs::write(
+            broken_dir.join("book.yaml"),
+            "not: valid: book: yaml: at: all",
+        )
+        .unwrap();
+
+        let result = list_books(&dir.path().to_string_lossy()).expect("should not fail outright");
+
+        assert_eq!(result.books.len(), 1, "the good book should still show up");
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("broken-book"));
     }
 }

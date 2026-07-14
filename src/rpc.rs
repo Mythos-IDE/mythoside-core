@@ -1,4 +1,7 @@
-use crate::manuscript::commands::{self, CreateCharacterInput, CreateSeriesInput};
+use crate::manuscript::commands::{
+    self, CreateBookInput, CreateCharacterInput, CreateLocationInput, CreateNoteInput,
+    CreateSeriesInput, UpdateSeriesInput,
+};
 use crate::watcher::{self, FileChangeEvent, WatcherState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -83,10 +86,20 @@ struct StartWatchingParams {
     path: String,
 }
 
+/// Shared by every method that takes nothing but a bare `project_dir`
+/// ("get_series", "list_books").
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GetSeriesParams {
+struct ProjectDirParams {
     project_dir: String,
+}
+
+/// Shared by every method that takes nothing but a bare `book_dir`
+/// ("list_characters", "list_locations", "list_notes").
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BookDirParams {
+    book_dir: String,
 }
 
 /// Routes one request's `(method, params)` to the matching handler. Kept
@@ -113,10 +126,58 @@ pub fn dispatch(
             serde_json::to_value(series).map_err(|e| e.to_string())
         }
         "get_series" => {
-            let GetSeriesParams { project_dir } =
+            let ProjectDirParams { project_dir } =
                 serde_json::from_value(params).map_err(|e| e.to_string())?;
             let series = commands::get_series(&project_dir)?;
             serde_json::to_value(series).map_err(|e| e.to_string())
+        }
+        "update_series" => {
+            let input: UpdateSeriesInput =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let series = commands::update_series(input)?;
+            serde_json::to_value(series).map_err(|e| e.to_string())
+        }
+        "create_book" => {
+            let input: CreateBookInput =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let book = commands::create_book(input)?;
+            serde_json::to_value(book).map_err(|e| e.to_string())
+        }
+        "list_books" => {
+            let ProjectDirParams { project_dir } =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let books = commands::list_books(&project_dir)?;
+            serde_json::to_value(books).map_err(|e| e.to_string())
+        }
+        "create_location" => {
+            let input: CreateLocationInput =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let location = commands::create_location(input)?;
+            serde_json::to_value(location).map_err(|e| e.to_string())
+        }
+        "list_locations" => {
+            let BookDirParams { book_dir } =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let locations = commands::list_locations(&book_dir)?;
+            serde_json::to_value(locations).map_err(|e| e.to_string())
+        }
+        "list_characters" => {
+            let BookDirParams { book_dir } =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let characters = commands::list_characters(&book_dir)?;
+            serde_json::to_value(characters).map_err(|e| e.to_string())
+        }
+        "create_note" => {
+            let input: CreateNoteInput =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let note = commands::create_note(input)?;
+            serde_json::to_value(note).map_err(|e| e.to_string())
+        }
+        "list_notes" => {
+            let BookDirParams { book_dir } =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let notes = commands::list_notes(&book_dir)?;
+            serde_json::to_value(notes).map_err(|e| e.to_string())
         }
         "start_watching" => {
             let StartWatchingParams { path } =
@@ -183,6 +244,119 @@ mod tests {
             .expect("get_series should succeed");
         assert_eq!(fetched["title"], "The Aethelgard Chronicles");
         assert_eq!(fetched["id"], created.series.id);
+    }
+
+    #[test]
+    fn dispatches_update_series() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let created = commands::create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "Original.".into(),
+            },
+        )
+        .unwrap();
+
+        let update_params = json!({
+            "projectDir": created.project_dir,
+            "title": "Revised Title",
+            "description": "Updated.",
+        });
+        let updated = dispatch("update_series", update_params, &watcher_state, &notifier)
+            .expect("update_series should succeed");
+        assert_eq!(updated["title"], "Revised Title");
+        assert_eq!(updated["id"], created.series.id);
+    }
+
+    #[test]
+    fn dispatches_create_book_then_list_books() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
+            "title": "Shadow of the Void",
+        });
+        let created = dispatch("create_book", create_params, &watcher_state, &notifier)
+            .expect("create_book should succeed");
+        assert_eq!(created["book"]["title"], "Shadow of the Void");
+        assert_eq!(created["book"]["order"], 1);
+
+        let list_params = json!({ "projectDir": dir.path().to_string_lossy() });
+        let listed = dispatch("list_books", list_params, &watcher_state, &notifier)
+            .expect("list_books should succeed");
+        assert_eq!(listed["books"].as_array().unwrap().len(), 1);
+        assert!(listed["warnings"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn dispatches_create_location_then_list_locations() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "bookDir": dir.path().to_string_lossy(),
+            "bookId": "book-1",
+            "name": "Aethelgard",
+        });
+        let created = dispatch("create_location", create_params, &watcher_state, &notifier)
+            .expect("create_location should succeed");
+        assert_eq!(created["name"], "Aethelgard");
+
+        let list_params = json!({ "bookDir": dir.path().to_string_lossy() });
+        let listed = dispatch("list_locations", list_params, &watcher_state, &notifier)
+            .expect("list_locations should succeed");
+        assert_eq!(listed["locations"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dispatches_create_note_then_list_notes() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "bookDir": dir.path().to_string_lossy(),
+            "bookId": "book-1",
+            "title": "The Sealing",
+            "type": "timeline",
+        });
+        let created = dispatch("create_note", create_params, &watcher_state, &notifier)
+            .expect("create_note should succeed");
+        assert_eq!(created["type"], "timeline");
+
+        let list_params = json!({ "bookDir": dir.path().to_string_lossy() });
+        let listed = dispatch("list_notes", list_params, &watcher_state, &notifier)
+            .expect("list_notes should succeed");
+        assert_eq!(listed["notes"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dispatches_list_characters() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "bookDir": dir.path().to_string_lossy(),
+            "bookId": "book-1",
+            "name": "Lyra Vance",
+            "role": "Protagonist",
+        });
+        dispatch("create_character", create_params, &watcher_state, &notifier)
+            .expect("create_character should succeed");
+
+        let list_params = json!({ "bookDir": dir.path().to_string_lossy() });
+        let listed = dispatch("list_characters", list_params, &watcher_state, &notifier)
+            .expect("list_characters should succeed");
+        assert_eq!(listed["characters"].as_array().unwrap().len(), 1);
     }
 
     #[test]
