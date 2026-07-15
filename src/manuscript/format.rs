@@ -113,7 +113,7 @@ pub fn serialize_scene(scene: &Scene) -> Result<String, String> {
 #[serde(rename_all = "camelCase")]
 struct CharacterMeta {
     id: String,
-    book_id: String,
+    series_id: String,
     name: String,
     role: String,
     #[serde(default)]
@@ -126,7 +126,7 @@ pub fn parse_character(file_text: &str) -> Result<Character, String> {
     let meta: CharacterMeta = parse_yaml(frontmatter)?;
     Ok(Character {
         id: meta.id,
-        book_id: meta.book_id,
+        series_id: meta.series_id,
         name: meta.name,
         role: meta.role,
         attributes: meta.attributes,
@@ -138,7 +138,7 @@ pub fn parse_character(file_text: &str) -> Result<Character, String> {
 pub fn serialize_character(character: &Character) -> Result<String, String> {
     let meta = CharacterMeta {
         id: character.id.clone(),
-        book_id: character.book_id.clone(),
+        series_id: character.series_id.clone(),
         name: character.name.clone(),
         role: character.role.clone(),
         attributes: character.attributes.clone(),
@@ -153,7 +153,7 @@ pub fn serialize_character(character: &Character) -> Result<String, String> {
 #[serde(rename_all = "camelCase")]
 struct LocationMeta {
     id: String,
-    book_id: String,
+    series_id: String,
     name: String,
     created_at: String,
 }
@@ -163,7 +163,7 @@ pub fn parse_location(file_text: &str) -> Result<Location, String> {
     let meta: LocationMeta = parse_yaml(frontmatter)?;
     Ok(Location {
         id: meta.id,
-        book_id: meta.book_id,
+        series_id: meta.series_id,
         name: meta.name,
         created_at: meta.created_at,
         description: body.to_string(),
@@ -173,7 +173,7 @@ pub fn parse_location(file_text: &str) -> Result<Location, String> {
 pub fn serialize_location(location: &Location) -> Result<String, String> {
     let meta = LocationMeta {
         id: location.id.clone(),
-        book_id: location.book_id.clone(),
+        series_id: location.series_id.clone(),
         name: location.name.clone(),
         created_at: location.created_at.clone(),
     };
@@ -186,7 +186,7 @@ pub fn serialize_location(location: &Location) -> Result<String, String> {
 #[serde(rename_all = "camelCase")]
 struct NoteMeta {
     id: String,
-    book_id: String,
+    series_id: String,
     title: String,
     #[serde(rename = "type")]
     note_type: NoteType,
@@ -198,7 +198,7 @@ pub fn parse_note(file_text: &str) -> Result<Note, String> {
     let meta: NoteMeta = parse_yaml(frontmatter)?;
     Ok(Note {
         id: meta.id,
-        book_id: meta.book_id,
+        series_id: meta.series_id,
         title: meta.title,
         note_type: meta.note_type,
         created_at: meta.created_at,
@@ -209,7 +209,7 @@ pub fn parse_note(file_text: &str) -> Result<Note, String> {
 pub fn serialize_note(note: &Note) -> Result<String, String> {
     let meta = NoteMeta {
         id: note.id.clone(),
-        book_id: note.book_id.clone(),
+        series_id: note.series_id.clone(),
         title: note.title.clone(),
         note_type: note.note_type.clone(),
         created_at: note.created_at.clone(),
@@ -287,7 +287,7 @@ mod tests {
         attributes.insert("home".to_string(), "Aethelgard".to_string());
         let character = Character {
             id: "lyra-vance".into(),
-            book_id: "book-1".into(),
+            series_id: "series-1".into(),
             name: "Lyra Vance".into(),
             role: "Protagonist".into(),
             attributes,
@@ -302,7 +302,7 @@ mod tests {
     fn round_trips_a_location_through_markdown_and_frontmatter() {
         let location = Location {
             id: "aethelgard".into(),
-            book_id: "book-1".into(),
+            series_id: "series-1".into(),
             name: "Aethelgard".into(),
             created_at: "2024-07-03T10:26:40Z".to_string(),
             description: "The last free city.".into(),
@@ -315,7 +315,7 @@ mod tests {
     fn round_trips_a_lore_note_through_markdown_and_frontmatter() {
         let note = Note {
             id: "note-1".into(),
-            book_id: "book-1".into(),
+            series_id: "series-1".into(),
             title: "The Void Walker Prophecy".into(),
             note_type: NoteType::Lore,
             created_at: "2024-07-03T10:26:40Z".to_string(),
@@ -330,7 +330,7 @@ mod tests {
     fn round_trips_a_timeline_note_through_markdown_and_frontmatter() {
         let note = Note {
             id: "note-2".into(),
-            book_id: "book-1".into(),
+            series_id: "series-1".into(),
             title: "The Sealing".into(),
             note_type: NoteType::Timeline,
             created_at: "2024-07-03T10:26:40Z".to_string(),

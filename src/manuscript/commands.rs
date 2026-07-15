@@ -37,10 +37,11 @@ fn slugify(input: &str) -> String {
 #[derive(Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCharacterInput {
-    /// Filesystem path to the book's folder — the character file is written
-    /// to `<book_dir>/characters/<slug>.md`.
-    pub book_dir: String,
-    pub book_id: String,
+    /// Filesystem path to the series' project root — the character file is
+    /// written to `<project_dir>/characters/<slug>.md`. Series-level, not
+    /// book-level: the same character can recur across multiple books.
+    pub project_dir: String,
+    pub series_id: String,
     pub name: String,
     pub role: String,
     #[serde(default)]
@@ -53,7 +54,7 @@ pub fn create_character(input: CreateCharacterInput) -> Result<Character, String
     let id = Uuid::new_v4().to_string();
     let character = Character {
         id: id.clone(),
-        book_id: input.book_id,
+        series_id: input.series_id,
         name: input.name.clone(),
         role: input.role,
         attributes: input.attributes,
@@ -61,7 +62,7 @@ pub fn create_character(input: CreateCharacterInput) -> Result<Character, String
         bio: input.bio,
     };
 
-    let characters_dir = Path::new(&input.book_dir).join("characters");
+    let characters_dir = Path::new(&input.project_dir).join("characters");
     fs::create_dir_all(&characters_dir).map_err(|e| e.to_string())?;
 
     // Short id suffix keeps filenames unique even if two characters share a name.
@@ -114,8 +115,8 @@ fn scan_entities<T>(
     (items, warnings)
 }
 
-pub fn list_characters(book_dir: &str) -> Result<ListCharactersOutput, String> {
-    let characters_dir = Path::new(book_dir).join("characters");
+pub fn list_characters(project_dir: &str) -> Result<ListCharactersOutput, String> {
+    let characters_dir = Path::new(project_dir).join("characters");
     let (characters, warnings) = scan_entities(&characters_dir, "md", format::parse_character);
     Ok(ListCharactersOutput {
         characters,
@@ -123,11 +124,53 @@ pub fn list_characters(book_dir: &str) -> Result<ListCharactersOutput, String> {
     })
 }
 
+/// `scan_entities`'s deletion counterpart: scans `dir` for files with the
+/// given extension, parses each, and moves the first one whose `id_of`
+/// matches `target_id` to the OS trash (not a permanent `fs::remove` — see
+/// `delete_series`'s doc comment for why). Errors if no match is found.
+fn delete_entity_by_id<T>(
+    dir: &Path,
+    extension: &str,
+    parse: impl Fn(&str) -> Result<T, String>,
+    id_of: impl Fn(&T) -> &str,
+    target_id: &str,
+) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some(extension) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(item) = parse(&text) else { continue };
+        if id_of(&item) == target_id {
+            return trash::delete(&path).map_err(|e| e.to_string());
+        }
+    }
+    Err(format!(
+        "no entity with id {target_id} found in {}",
+        dir.display()
+    ))
+}
+
+pub fn delete_character(project_dir: &str, character_id: &str) -> Result<(), String> {
+    let characters_dir = Path::new(project_dir).join("characters");
+    delete_entity_by_id(
+        &characters_dir,
+        "md",
+        format::parse_character,
+        |c| &c.id,
+        character_id,
+    )
+}
+
 #[derive(Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateLocationInput {
-    pub book_dir: String,
-    pub book_id: String,
+    pub project_dir: String,
+    pub series_id: String,
     pub name: String,
     #[serde(default)]
     pub description: String,
@@ -137,13 +180,13 @@ pub fn create_location(input: CreateLocationInput) -> Result<Location, String> {
     let id = Uuid::new_v4().to_string();
     let location = Location {
         id: id.clone(),
-        book_id: input.book_id,
+        series_id: input.series_id,
         name: input.name.clone(),
         created_at: now_iso8601(),
         description: input.description,
     };
 
-    let locations_dir = Path::new(&input.book_dir).join("locations");
+    let locations_dir = Path::new(&input.project_dir).join("locations");
     fs::create_dir_all(&locations_dir).map_err(|e| e.to_string())?;
 
     // Short id suffix keeps filenames unique even if two locations share a name.
@@ -162,8 +205,8 @@ pub struct ListLocationsOutput {
     pub warnings: Vec<String>,
 }
 
-pub fn list_locations(book_dir: &str) -> Result<ListLocationsOutput, String> {
-    let locations_dir = Path::new(book_dir).join("locations");
+pub fn list_locations(project_dir: &str) -> Result<ListLocationsOutput, String> {
+    let locations_dir = Path::new(project_dir).join("locations");
     let (locations, warnings) = scan_entities(&locations_dir, "md", format::parse_location);
     Ok(ListLocationsOutput {
         locations,
@@ -171,11 +214,22 @@ pub fn list_locations(book_dir: &str) -> Result<ListLocationsOutput, String> {
     })
 }
 
+pub fn delete_location(project_dir: &str, location_id: &str) -> Result<(), String> {
+    let locations_dir = Path::new(project_dir).join("locations");
+    delete_entity_by_id(
+        &locations_dir,
+        "md",
+        format::parse_location,
+        |l| &l.id,
+        location_id,
+    )
+}
+
 #[derive(Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateNoteInput {
-    pub book_dir: String,
-    pub book_id: String,
+    pub project_dir: String,
+    pub series_id: String,
     pub title: String,
     // `Note` itself wire-renames this field to `type` (models.rs) — matched
     // here on purpose so TS sees `input.type`/`note.type` consistently
@@ -190,14 +244,14 @@ pub fn create_note(input: CreateNoteInput) -> Result<Note, String> {
     let id = Uuid::new_v4().to_string();
     let note = Note {
         id: id.clone(),
-        book_id: input.book_id,
+        series_id: input.series_id,
         title: input.title.clone(),
         note_type: input.note_type,
         created_at: now_iso8601(),
         content: input.content,
     };
 
-    let notes_dir = Path::new(&input.book_dir).join("notes");
+    let notes_dir = Path::new(&input.project_dir).join("notes");
     fs::create_dir_all(&notes_dir).map_err(|e| e.to_string())?;
 
     // Short id suffix keeps filenames unique even if two notes share a title.
@@ -216,10 +270,15 @@ pub struct ListNotesOutput {
     pub warnings: Vec<String>,
 }
 
-pub fn list_notes(book_dir: &str) -> Result<ListNotesOutput, String> {
-    let notes_dir = Path::new(book_dir).join("notes");
+pub fn list_notes(project_dir: &str) -> Result<ListNotesOutput, String> {
+    let notes_dir = Path::new(project_dir).join("notes");
     let (notes, warnings) = scan_entities(&notes_dir, "md", format::parse_note);
     Ok(ListNotesOutput { notes, warnings })
+}
+
+pub fn delete_note(project_dir: &str, note_id: &str) -> Result<(), String> {
+    let notes_dir = Path::new(project_dir).join("notes");
+    delete_entity_by_id(&notes_dir, "md", format::parse_note, |n| &n.id, note_id)
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -347,6 +406,16 @@ pub fn get_series(project_dir: &str) -> Result<Series, String> {
     format::parse_series(&contents)
 }
 
+/// Moves the whole series folder — every book, character, location, and
+/// note in it — to the OS trash rather than a permanent `fs::remove_dir_all`.
+/// A recoverable delete (same as dragging the folder to Finder's Trash)
+/// matches this app's local-first "never lose the user's manuscript"
+/// premise better than an unrecoverable one; a confirmation dialog on the
+/// frontend guards the click itself.
+pub fn delete_series(project_dir: &str) -> Result<(), String> {
+    trash::delete(project_dir).map_err(|e| e.to_string())
+}
+
 #[derive(Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSeriesInput {
@@ -375,9 +444,10 @@ pub fn update_series(input: UpdateSeriesInput) -> Result<Series, String> {
 pub struct BookHandle {
     pub book: Book,
     /// Where `book.yaml` actually landed — mirrors `CreateSeriesOutput`'s
-    /// `project_dir` pairing. Character/Location/Note all key off a book,
-    /// not a series (see their `book_id`/`book_dir` fields), so callers need
-    /// this to create any of those under the returned book.
+    /// `project_dir` pairing. Needed for anything that's genuinely
+    /// book-scoped (currently just `delete_book`) — Character/Location/Note
+    /// live at the series level instead (see their `series_id` fields), not
+    /// under this directory.
     pub book_dir: String,
 }
 
@@ -391,22 +461,29 @@ pub struct CreateBookInput {
     pub synopsis: String,
 }
 
-/// Counts existing `<project_dir>/*/book.yaml` folders to assign the next
-/// `order` automatically, the same "don't make the user supply what the
-/// system can compute" call as `create_series`'s path resolution.
-///
-/// NOTE: if a `delete_book` command is ever added, two books could collide
-/// on `order` after a delete-then-recreate. Not solved here — there's no
-/// delete in scope yet, and it's cheap to revisit once there is.
+/// Assigns the next `order` automatically — the same "don't make the user
+/// supply what the system can compute" call as `create_series`'s path
+/// resolution. Uses the *highest existing* `order` + 1, not a plain count:
+/// counting would collide after a delete-then-recreate (delete book 2 of 3,
+/// add a new book — counting existing book.yaml files gives 3, but book 3
+/// already has order 3). Max-based avoids that regardless of which book was
+/// deleted.
 fn next_book_order(project_dir: &Path) -> u32 {
     let Ok(entries) = fs::read_dir(project_dir) else {
         return 1;
     };
-    let existing = entries
+    let max_existing = entries
         .flatten()
-        .filter(|entry| entry.path().join("book.yaml").is_file())
-        .count();
-    existing as u32 + 1
+        .filter_map(|entry| {
+            let book_yaml = entry.path().join("book.yaml");
+            fs::read_to_string(&book_yaml)
+                .ok()
+                .and_then(|text| format::parse_book(&text).ok())
+                .map(|book| book.order)
+        })
+        .max()
+        .unwrap_or(0);
+    max_existing + 1
 }
 
 pub fn create_book(input: CreateBookInput) -> Result<BookHandle, String> {
@@ -475,6 +552,14 @@ pub fn list_books(project_dir: &str) -> Result<ListBooksOutput, String> {
     Ok(ListBooksOutput { books, warnings })
 }
 
+/// Moves the book folder to the OS trash (see `delete_series`'s doc comment
+/// for the recoverable-delete rationale). Safe on its own now that
+/// Character/Location/Note live at the series level — deleting a book no
+/// longer risks taking any of them down with it.
+pub fn delete_book(book_dir: &str) -> Result<(), String> {
+    trash::delete(book_dir).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,8 +574,8 @@ mod tests {
     fn creates_a_character_file_on_disk() {
         let dir = tempfile::tempdir().unwrap();
         let input = CreateCharacterInput {
-            book_dir: dir.path().to_string_lossy().into_owned(),
-            book_id: "book-1".into(),
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            series_id: "series-1".into(),
             name: "Lyra Vance".into(),
             role: "Protagonist".into(),
             bio: "Stealthy, skilled in alchemy.".into(),
@@ -707,8 +792,8 @@ mod tests {
     fn creates_a_location_file_on_disk() {
         let dir = tempfile::tempdir().unwrap();
         let location = create_location(CreateLocationInput {
-            book_dir: dir.path().to_string_lossy().into_owned(),
-            book_id: "book-1".into(),
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            series_id: "series-1".into(),
             name: "Aethelgard".into(),
             description: "The last free city.".into(),
         })
@@ -725,25 +810,25 @@ mod tests {
     }
 
     #[test]
-    fn lists_locations_for_a_book() {
+    fn lists_locations_for_a_series() {
         let dir = tempfile::tempdir().unwrap();
-        let book_dir = dir.path().to_string_lossy().into_owned();
+        let project_dir = dir.path().to_string_lossy().into_owned();
         create_location(CreateLocationInput {
-            book_dir: book_dir.clone(),
-            book_id: "book-1".into(),
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
             name: "Aethelgard".into(),
             description: "The last free city.".into(),
         })
         .unwrap();
 
-        let result = list_locations(&book_dir).expect("should list locations");
+        let result = list_locations(&project_dir).expect("should list locations");
         assert!(result.warnings.is_empty());
         assert_eq!(result.locations.len(), 1);
         assert_eq!(result.locations[0].name, "Aethelgard");
     }
 
     #[test]
-    fn list_locations_is_empty_when_the_book_has_none_yet() {
+    fn list_locations_is_empty_when_the_series_has_none_yet() {
         let dir = tempfile::tempdir().unwrap();
         let result = list_locations(&dir.path().to_string_lossy()).expect("should not fail");
         assert!(result.locations.is_empty());
@@ -751,12 +836,30 @@ mod tests {
     }
 
     #[test]
-    fn lists_characters_for_a_book() {
+    fn deletes_a_location_by_id() {
         let dir = tempfile::tempdir().unwrap();
-        let book_dir = dir.path().to_string_lossy().into_owned();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+        let location = create_location(CreateLocationInput {
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
+            name: "Aethelgard".into(),
+            description: "".into(),
+        })
+        .unwrap();
+
+        delete_location(&project_dir, &location.id).expect("should delete the location");
+
+        let result = list_locations(&project_dir).unwrap();
+        assert!(result.locations.is_empty());
+    }
+
+    #[test]
+    fn lists_characters_for_a_series() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
         create_character(CreateCharacterInput {
-            book_dir: book_dir.clone(),
-            book_id: "book-1".into(),
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
             name: "Lyra Vance".into(),
             role: "Protagonist".into(),
             bio: "".into(),
@@ -764,18 +867,55 @@ mod tests {
         })
         .unwrap();
 
-        let result = list_characters(&book_dir).expect("should list characters");
+        let result = list_characters(&project_dir).expect("should list characters");
         assert!(result.warnings.is_empty());
         assert_eq!(result.characters.len(), 1);
         assert_eq!(result.characters[0].name, "Lyra Vance");
     }
 
     #[test]
+    fn deletes_a_character_by_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+        let character = create_character(CreateCharacterInput {
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
+            name: "Lyra Vance".into(),
+            role: "Protagonist".into(),
+            bio: "".into(),
+            attributes: HashMap::new(),
+        })
+        .unwrap();
+
+        delete_character(&project_dir, &character.id).expect("should delete the character");
+
+        let result = list_characters(&project_dir).unwrap();
+        assert!(result.characters.is_empty());
+    }
+
+    #[test]
+    fn delete_character_fails_when_no_character_has_that_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+        create_character(CreateCharacterInput {
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
+            name: "Lyra Vance".into(),
+            role: "Protagonist".into(),
+            bio: "".into(),
+            attributes: HashMap::new(),
+        })
+        .unwrap();
+
+        assert!(delete_character(&project_dir, "not-a-real-id").is_err());
+    }
+
+    #[test]
     fn creates_a_timeline_note_file_on_disk() {
         let dir = tempfile::tempdir().unwrap();
         let note = create_note(CreateNoteInput {
-            book_dir: dir.path().to_string_lossy().into_owned(),
-            book_id: "book-1".into(),
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            series_id: "series-1".into(),
             title: "The Sealing".into(),
             note_type: NoteType::Timeline,
             content: "Year 0 of the Third Age.".into(),
@@ -793,27 +933,27 @@ mod tests {
     }
 
     #[test]
-    fn lists_notes_of_both_types_for_a_book() {
+    fn lists_notes_of_both_types_for_a_series() {
         let dir = tempfile::tempdir().unwrap();
-        let book_dir = dir.path().to_string_lossy().into_owned();
+        let project_dir = dir.path().to_string_lossy().into_owned();
         create_note(CreateNoteInput {
-            book_dir: book_dir.clone(),
-            book_id: "book-1".into(),
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
             title: "The Sealing".into(),
             note_type: NoteType::Timeline,
             content: "Year 0.".into(),
         })
         .unwrap();
         create_note(CreateNoteInput {
-            book_dir: book_dir.clone(),
-            book_id: "book-1".into(),
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
             title: "The Void Walker Prophecy".into(),
             note_type: NoteType::Lore,
             content: "Long ago...".into(),
         })
         .unwrap();
 
-        let result = list_notes(&book_dir).expect("should list notes");
+        let result = list_notes(&project_dir).expect("should list notes");
         assert!(result.warnings.is_empty());
         assert_eq!(result.notes.len(), 2);
         assert!(result
@@ -821,6 +961,83 @@ mod tests {
             .iter()
             .any(|n| n.note_type == NoteType::Timeline));
         assert!(result.notes.iter().any(|n| n.note_type == NoteType::Lore));
+    }
+
+    #[test]
+    fn deletes_a_note_by_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+        let note = create_note(CreateNoteInput {
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
+            title: "The Sealing".into(),
+            note_type: NoteType::Timeline,
+            content: "".into(),
+        })
+        .unwrap();
+
+        delete_note(&project_dir, &note.id).expect("should delete the note");
+
+        let result = list_notes(&project_dir).unwrap();
+        assert!(result.notes.is_empty());
+    }
+
+    #[test]
+    fn deletes_a_series_and_everything_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let created = create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+
+        delete_series(&created.project_dir).expect("should delete the series");
+
+        assert!(!Path::new(&created.project_dir).exists());
+    }
+
+    #[test]
+    fn deletes_a_book() {
+        let dir = tempfile::tempdir().unwrap();
+        let handle = create_book(CreateBookInput {
+            project_dir: dir.path().to_string_lossy().into_owned(),
+            series_id: "series-1".into(),
+            title: "Shadow of the Void".into(),
+            synopsis: "".into(),
+        })
+        .unwrap();
+
+        delete_book(&handle.book_dir).expect("should delete the book");
+
+        assert!(!Path::new(&handle.book_dir).exists());
+    }
+
+    #[test]
+    fn create_book_after_delete_does_not_collide_on_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+        let input = |title: &str| CreateBookInput {
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
+            title: title.into(),
+            synopsis: "".into(),
+        };
+
+        let first = create_book(input("Shadow of the Void")).unwrap();
+        let second = create_book(input("The Obsidian Gate")).unwrap();
+        assert_eq!(first.book.order, 1);
+        assert_eq!(second.book.order, 2);
+
+        delete_book(&second.book_dir).unwrap();
+
+        let third = create_book(input("The Last Ember")).unwrap();
+        assert_eq!(
+            third.book.order, 2,
+            "max-based order should reuse the freed slot, not collide with book 1"
+        );
     }
 
     #[test]

@@ -94,12 +94,31 @@ struct ProjectDirParams {
     project_dir: String,
 }
 
-/// Shared by every method that takes nothing but a bare `book_dir`
-/// ("list_characters", "list_locations", "list_notes").
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BookDirParams {
+struct DeleteBookParams {
     book_dir: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteCharacterParams {
+    project_dir: String,
+    character_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteLocationParams {
+    project_dir: String,
+    location_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteNoteParams {
+    project_dir: String,
+    note_id: String,
 }
 
 /// Routes one request's `(method, params)` to the matching handler. Kept
@@ -163,15 +182,15 @@ pub fn dispatch(
             serde_json::to_value(location).map_err(|e| e.to_string())
         }
         "list_locations" => {
-            let BookDirParams { book_dir } =
+            let ProjectDirParams { project_dir } =
                 serde_json::from_value(params).map_err(|e| e.to_string())?;
-            let locations = commands::list_locations(&book_dir)?;
+            let locations = commands::list_locations(&project_dir)?;
             serde_json::to_value(locations).map_err(|e| e.to_string())
         }
         "list_characters" => {
-            let BookDirParams { book_dir } =
+            let ProjectDirParams { project_dir } =
                 serde_json::from_value(params).map_err(|e| e.to_string())?;
-            let characters = commands::list_characters(&book_dir)?;
+            let characters = commands::list_characters(&project_dir)?;
             serde_json::to_value(characters).map_err(|e| e.to_string())
         }
         "create_note" => {
@@ -181,10 +200,46 @@ pub fn dispatch(
             serde_json::to_value(note).map_err(|e| e.to_string())
         }
         "list_notes" => {
-            let BookDirParams { book_dir } =
+            let ProjectDirParams { project_dir } =
                 serde_json::from_value(params).map_err(|e| e.to_string())?;
-            let notes = commands::list_notes(&book_dir)?;
+            let notes = commands::list_notes(&project_dir)?;
             serde_json::to_value(notes).map_err(|e| e.to_string())
+        }
+        "delete_series" => {
+            let ProjectDirParams { project_dir } =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            commands::delete_series(&project_dir)?;
+            Ok(Value::Null)
+        }
+        "delete_book" => {
+            let DeleteBookParams { book_dir } =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            commands::delete_book(&book_dir)?;
+            Ok(Value::Null)
+        }
+        "delete_character" => {
+            let DeleteCharacterParams {
+                project_dir,
+                character_id,
+            } = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            commands::delete_character(&project_dir, &character_id)?;
+            Ok(Value::Null)
+        }
+        "delete_location" => {
+            let DeleteLocationParams {
+                project_dir,
+                location_id,
+            } = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            commands::delete_location(&project_dir, &location_id)?;
+            Ok(Value::Null)
+        }
+        "delete_note" => {
+            let DeleteNoteParams {
+                project_dir,
+                note_id,
+            } = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            commands::delete_note(&project_dir, &note_id)?;
+            Ok(Value::Null)
         }
         "start_watching" => {
             let StartWatchingParams { path } =
@@ -215,8 +270,8 @@ mod tests {
         let notifier = Notifier::default();
 
         let params = json!({
-            "bookDir": dir.path().to_string_lossy(),
-            "bookId": "book-1",
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
             "name": "Lyra Vance",
             "role": "Protagonist",
         });
@@ -309,15 +364,15 @@ mod tests {
         let notifier = Notifier::default();
 
         let create_params = json!({
-            "bookDir": dir.path().to_string_lossy(),
-            "bookId": "book-1",
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
             "name": "Aethelgard",
         });
         let created = dispatch("create_location", create_params, &watcher_state, &notifier)
             .expect("create_location should succeed");
         assert_eq!(created["name"], "Aethelgard");
 
-        let list_params = json!({ "bookDir": dir.path().to_string_lossy() });
+        let list_params = json!({ "projectDir": dir.path().to_string_lossy() });
         let listed = dispatch("list_locations", list_params, &watcher_state, &notifier)
             .expect("list_locations should succeed");
         assert_eq!(listed["locations"].as_array().unwrap().len(), 1);
@@ -330,8 +385,8 @@ mod tests {
         let notifier = Notifier::default();
 
         let create_params = json!({
-            "bookDir": dir.path().to_string_lossy(),
-            "bookId": "book-1",
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
             "title": "The Sealing",
             "type": "timeline",
         });
@@ -339,7 +394,7 @@ mod tests {
             .expect("create_note should succeed");
         assert_eq!(created["type"], "timeline");
 
-        let list_params = json!({ "bookDir": dir.path().to_string_lossy() });
+        let list_params = json!({ "projectDir": dir.path().to_string_lossy() });
         let listed = dispatch("list_notes", list_params, &watcher_state, &notifier)
             .expect("list_notes should succeed");
         assert_eq!(listed["notes"].as_array().unwrap().len(), 1);
@@ -352,18 +407,128 @@ mod tests {
         let notifier = Notifier::default();
 
         let create_params = json!({
-            "bookDir": dir.path().to_string_lossy(),
-            "bookId": "book-1",
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
             "name": "Lyra Vance",
             "role": "Protagonist",
         });
         dispatch("create_character", create_params, &watcher_state, &notifier)
             .expect("create_character should succeed");
 
-        let list_params = json!({ "bookDir": dir.path().to_string_lossy() });
+        let list_params = json!({ "projectDir": dir.path().to_string_lossy() });
         let listed = dispatch("list_characters", list_params, &watcher_state, &notifier)
             .expect("list_characters should succeed");
         assert_eq!(listed["characters"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dispatches_delete_book() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
+            "title": "Shadow of the Void",
+        });
+        let created = dispatch("create_book", create_params, &watcher_state, &notifier).unwrap();
+        let book_dir = created["bookDir"].as_str().unwrap();
+
+        let delete_params = json!({ "bookDir": book_dir });
+        assert!(dispatch("delete_book", delete_params, &watcher_state, &notifier).is_ok());
+        assert!(!std::path::Path::new(book_dir).exists());
+    }
+
+    #[test]
+    fn dispatches_delete_character() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
+            "name": "Lyra Vance",
+            "role": "Protagonist",
+        });
+        let created =
+            dispatch("create_character", create_params, &watcher_state, &notifier).unwrap();
+        let character_id = created["id"].as_str().unwrap();
+
+        let delete_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "characterId": character_id,
+        });
+        assert!(dispatch("delete_character", delete_params, &watcher_state, &notifier).is_ok());
+
+        let list_params = json!({ "projectDir": dir.path().to_string_lossy() });
+        let listed = dispatch("list_characters", list_params, &watcher_state, &notifier).unwrap();
+        assert!(listed["characters"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn dispatches_delete_location() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
+            "name": "Aethelgard",
+        });
+        let created =
+            dispatch("create_location", create_params, &watcher_state, &notifier).unwrap();
+        let location_id = created["id"].as_str().unwrap();
+
+        let delete_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "locationId": location_id,
+        });
+        assert!(dispatch("delete_location", delete_params, &watcher_state, &notifier).is_ok());
+    }
+
+    #[test]
+    fn dispatches_delete_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "seriesId": "series-1",
+            "title": "The Sealing",
+            "type": "timeline",
+        });
+        let created = dispatch("create_note", create_params, &watcher_state, &notifier).unwrap();
+        let note_id = created["id"].as_str().unwrap();
+
+        let delete_params = json!({
+            "projectDir": dir.path().to_string_lossy(),
+            "noteId": note_id,
+        });
+        assert!(dispatch("delete_note", delete_params, &watcher_state, &notifier).is_ok());
+    }
+
+    #[test]
+    fn dispatches_delete_series() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let created = commands::create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+
+        let delete_params = json!({ "projectDir": created.project_dir });
+        assert!(dispatch("delete_series", delete_params, &watcher_state, &notifier).is_ok());
+        assert!(!std::path::Path::new(&created.project_dir).exists());
     }
 
     #[test]

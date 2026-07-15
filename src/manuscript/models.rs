@@ -49,7 +49,10 @@ pub struct Scene {
 #[serde(rename_all = "camelCase")]
 pub struct Character {
     pub id: String,
-    pub book_id: String,
+    /// Series-level, not book-level: the same character can appear across
+    /// multiple books in the series (Book 1, Book 2, ...), so ownership
+    /// can't be pinned to a single book.
+    pub series_id: String,
     pub name: String,
     pub role: String,
     pub attributes: HashMap<String, String>,
@@ -61,7 +64,9 @@ pub struct Character {
 #[serde(rename_all = "camelCase")]
 pub struct Location {
     pub id: String,
-    pub book_id: String,
+    /// Series-level for the same reason as `Character::series_id` — a
+    /// location can recur across multiple books.
+    pub series_id: String,
     pub name: String,
     pub created_at: String,
     pub description: String, // Markdown body
@@ -78,7 +83,8 @@ pub enum NoteType {
 #[serde(rename_all = "camelCase")]
 pub struct Note {
     pub id: String,
-    pub book_id: String,
+    /// Series-level for the same reason as `Character::series_id`.
+    pub series_id: String,
     pub title: String,
     #[serde(rename = "type")]
     pub note_type: NoteType,
