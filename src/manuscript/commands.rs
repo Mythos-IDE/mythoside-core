@@ -62,7 +62,8 @@ pub fn create_character(input: CreateCharacterInput) -> Result<Character, String
         bio: input.bio,
     };
 
-    let characters_dir = Path::new(&input.project_dir).join("characters");
+    let project_dir = Path::new(&input.project_dir);
+    let characters_dir = project_dir.join("characters");
     fs::create_dir_all(&characters_dir).map_err(|e| e.to_string())?;
 
     // Short id suffix keeps filenames unique even if two characters share a name.
@@ -70,6 +71,10 @@ pub fn create_character(input: CreateCharacterInput) -> Result<Character, String
     let file_path = characters_dir.join(format!("{slug}.md"));
     let contents = format::serialize_character(&character)?;
     fs::write(&file_path, contents).map_err(|e| e.to_string())?;
+
+    let _ = update_series_yaml(project_dir, |series| {
+        series.character_ids.push(character.id.clone())
+    });
 
     Ok(character)
 }
@@ -163,7 +168,13 @@ pub fn delete_character(project_dir: &str, character_id: &str) -> Result<(), Str
         format::parse_character,
         |c| &c.id,
         character_id,
-    )
+    )?;
+
+    let _ = update_series_yaml(Path::new(project_dir), |series| {
+        series.character_ids.retain(|id| id != character_id)
+    });
+
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -186,7 +197,8 @@ pub fn create_location(input: CreateLocationInput) -> Result<Location, String> {
         description: input.description,
     };
 
-    let locations_dir = Path::new(&input.project_dir).join("locations");
+    let project_dir = Path::new(&input.project_dir);
+    let locations_dir = project_dir.join("locations");
     fs::create_dir_all(&locations_dir).map_err(|e| e.to_string())?;
 
     // Short id suffix keeps filenames unique even if two locations share a name.
@@ -194,6 +206,10 @@ pub fn create_location(input: CreateLocationInput) -> Result<Location, String> {
     let file_path = locations_dir.join(format!("{slug}.md"));
     let contents = format::serialize_location(&location)?;
     fs::write(&file_path, contents).map_err(|e| e.to_string())?;
+
+    let _ = update_series_yaml(project_dir, |series| {
+        series.location_ids.push(location.id.clone())
+    });
 
     Ok(location)
 }
@@ -222,7 +238,13 @@ pub fn delete_location(project_dir: &str, location_id: &str) -> Result<(), Strin
         format::parse_location,
         |l| &l.id,
         location_id,
-    )
+    )?;
+
+    let _ = update_series_yaml(Path::new(project_dir), |series| {
+        series.location_ids.retain(|id| id != location_id)
+    });
+
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -251,7 +273,8 @@ pub fn create_note(input: CreateNoteInput) -> Result<Note, String> {
         content: input.content,
     };
 
-    let notes_dir = Path::new(&input.project_dir).join("notes");
+    let project_dir = Path::new(&input.project_dir);
+    let notes_dir = project_dir.join("notes");
     fs::create_dir_all(&notes_dir).map_err(|e| e.to_string())?;
 
     // Short id suffix keeps filenames unique even if two notes share a title.
@@ -259,6 +282,8 @@ pub fn create_note(input: CreateNoteInput) -> Result<Note, String> {
     let file_path = notes_dir.join(format!("{slug}.md"));
     let contents = format::serialize_note(&note)?;
     fs::write(&file_path, contents).map_err(|e| e.to_string())?;
+
+    let _ = update_series_yaml(project_dir, |series| series.note_ids.push(note.id.clone()));
 
     Ok(note)
 }
@@ -278,7 +303,13 @@ pub fn list_notes(project_dir: &str) -> Result<ListNotesOutput, String> {
 
 pub fn delete_note(project_dir: &str, note_id: &str) -> Result<(), String> {
     let notes_dir = Path::new(project_dir).join("notes");
-    delete_entity_by_id(&notes_dir, "md", format::parse_note, |n| &n.id, note_id)
+    delete_entity_by_id(&notes_dir, "md", format::parse_note, |n| &n.id, note_id)?;
+
+    let _ = update_series_yaml(Path::new(project_dir), |series| {
+        series.note_ids.retain(|id| id != note_id)
+    });
+
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -322,16 +353,29 @@ pub(crate) fn create_series_in(
     base_dir: &Path,
     input: CreateSeriesInput,
 ) -> Result<CreateSeriesOutput, String> {
-    let id = Uuid::new_v4().to_string();
-    // Short id suffix keeps folder names unique even if two series share a title.
-    let slug = format!("{}-{}", slugify(&input.title), &id[..8]);
+    // No random id suffix on the folder name — it's derived purely from the
+    // title, so it's predictable and two series can't silently collide with
+    // different folders. If the slug's already taken, that's treated as "a
+    // series with this name already exists" rather than picking a new name
+    // out from under the user.
+    let slug = slugify(&input.title);
     let project_dir = base_dir.join("MythosIDE").join(&slug);
+    if project_dir.exists() {
+        return Err(format!(
+            "Bu isimle (\"{}\") bir seri zaten var",
+            input.title
+        ));
+    }
 
     let series = Series {
-        id,
+        id: Uuid::new_v4().to_string(),
         title: input.title,
         description: input.description,
         created_at: now_iso8601(),
+        book_ids: Vec::new(),
+        character_ids: Vec::new(),
+        location_ids: Vec::new(),
+        note_ids: Vec::new(),
     };
 
     fs::create_dir_all(&project_dir).map_err(|e| e.to_string())?;
@@ -404,6 +448,22 @@ pub fn get_series(project_dir: &str) -> Result<Series, String> {
     let contents = fs::read_to_string(&file_path)
         .map_err(|e| format!("could not read {}: {e}", file_path.display()))?;
     format::parse_series(&contents)
+}
+
+/// Reads `<project_dir>/series.yaml`, applies `mutate` to it, writes it back.
+/// Used to keep `Series`'s `*_ids` index fields in sync as entities are
+/// created/deleted. Deliberately not `?`-propagated by callers that create
+/// or delete an entity: the entity file itself is the real operation and
+/// has already succeeded by the time this runs, so a failure here (e.g. a
+/// hand-edited series.yaml that's briefly unparseable) shouldn't make the
+/// caller think the create/delete itself failed — see this field's doc
+/// comment on `Series` for why the index is a best-effort convenience, not
+/// the source of truth.
+fn update_series_yaml(project_dir: &Path, mutate: impl FnOnce(&mut Series)) -> Result<(), String> {
+    let mut series = get_series(&project_dir.to_string_lossy())?;
+    mutate(&mut series);
+    let contents = format::serialize_series(&series)?;
+    fs::write(project_dir.join("series.yaml"), contents).map_err(|e| e.to_string())
 }
 
 /// Moves the whole series folder — every book, character, location, and
@@ -508,6 +568,8 @@ pub fn create_book(input: CreateBookInput) -> Result<BookHandle, String> {
     let contents = format::serialize_book(&book)?;
     fs::write(book_dir.join("book.yaml"), contents).map_err(|e| e.to_string())?;
 
+    let _ = update_series_yaml(project_dir, |series| series.book_ids.push(book.id.clone()));
+
     Ok(BookHandle {
         book,
         book_dir: book_dir.to_string_lossy().into_owned(),
@@ -557,7 +619,25 @@ pub fn list_books(project_dir: &str) -> Result<ListBooksOutput, String> {
 /// Character/Location/Note live at the series level — deleting a book no
 /// longer risks taking any of them down with it.
 pub fn delete_book(book_dir: &str) -> Result<(), String> {
-    trash::delete(book_dir).map_err(|e| e.to_string())
+    let book_dir_path = Path::new(book_dir);
+    // Read the book's id (and locate its parent series) before trashing the
+    // folder — both are needed to remove it from the series' index after,
+    // and neither is recoverable once the folder's gone.
+    let book_id = fs::read_to_string(book_dir_path.join("book.yaml"))
+        .ok()
+        .and_then(|text| format::parse_book(&text).ok())
+        .map(|book| book.id);
+    let series_project_dir = book_dir_path.parent().map(Path::to_path_buf);
+
+    trash::delete(book_dir).map_err(|e| e.to_string())?;
+
+    if let (Some(project_dir), Some(book_id)) = (series_project_dir, book_id) {
+        let _ = update_series_yaml(&project_dir, |series| {
+            series.book_ids.retain(|id| id != &book_id)
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -606,11 +686,30 @@ mod tests {
         let output = create_series_in(dir.path(), input).expect("should create the series");
         assert_eq!(output.series.title, "The Aethelgard Chronicles");
         assert!(!output.series.id.is_empty());
-        assert!(output.project_dir.contains("the-aethelgard-chronicles"));
+        // No random id suffix: the folder name is deterministic from the title.
+        assert_eq!(
+            Path::new(&output.project_dir).file_name().unwrap(),
+            "the-aethelgard-chronicles"
+        );
 
         let written =
             fs::read_to_string(Path::new(&output.project_dir).join("series.yaml")).unwrap();
         assert_eq!(format::parse_series(&written).unwrap(), output.series);
+    }
+
+    #[test]
+    fn create_series_fails_when_a_series_with_the_same_name_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = || CreateSeriesInput {
+            title: "The Aethelgard Chronicles".into(),
+            description: "".into(),
+        };
+
+        create_series_in(dir.path(), input()).expect("first create should succeed");
+        let result = create_series_in(dir.path(), input());
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Bu isimle"));
     }
 
     #[test]
@@ -1038,6 +1137,125 @@ mod tests {
             third.book.order, 2,
             "max-based order should reuse the freed slot, not collide with book 1"
         );
+    }
+
+    #[test]
+    fn create_and_delete_book_syncs_the_series_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let created = create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+
+        let handle = create_book(CreateBookInput {
+            project_dir: created.project_dir.clone(),
+            series_id: created.series.id.clone(),
+            title: "Shadow of the Void".into(),
+            synopsis: "".into(),
+        })
+        .unwrap();
+
+        let series = get_series(&created.project_dir).unwrap();
+        assert_eq!(series.book_ids, vec![handle.book.id.clone()]);
+
+        delete_book(&handle.book_dir).unwrap();
+
+        let series = get_series(&created.project_dir).unwrap();
+        assert!(series.book_ids.is_empty());
+    }
+
+    #[test]
+    fn create_and_delete_character_syncs_the_series_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let created = create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+
+        let character = create_character(CreateCharacterInput {
+            project_dir: created.project_dir.clone(),
+            series_id: created.series.id.clone(),
+            name: "Lyra Vance".into(),
+            role: "Protagonist".into(),
+            bio: "".into(),
+            attributes: HashMap::new(),
+        })
+        .unwrap();
+
+        let series = get_series(&created.project_dir).unwrap();
+        assert_eq!(series.character_ids, vec![character.id.clone()]);
+
+        delete_character(&created.project_dir, &character.id).unwrap();
+
+        let series = get_series(&created.project_dir).unwrap();
+        assert!(series.character_ids.is_empty());
+    }
+
+    #[test]
+    fn create_and_delete_location_syncs_the_series_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let created = create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+
+        let location = create_location(CreateLocationInput {
+            project_dir: created.project_dir.clone(),
+            series_id: created.series.id.clone(),
+            name: "Aethelgard".into(),
+            description: "".into(),
+        })
+        .unwrap();
+
+        let series = get_series(&created.project_dir).unwrap();
+        assert_eq!(series.location_ids, vec![location.id.clone()]);
+
+        delete_location(&created.project_dir, &location.id).unwrap();
+
+        let series = get_series(&created.project_dir).unwrap();
+        assert!(series.location_ids.is_empty());
+    }
+
+    #[test]
+    fn create_and_delete_note_syncs_the_series_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let created = create_series_in(
+            dir.path(),
+            CreateSeriesInput {
+                title: "The Aethelgard Chronicles".into(),
+                description: "".into(),
+            },
+        )
+        .unwrap();
+
+        let note = create_note(CreateNoteInput {
+            project_dir: created.project_dir.clone(),
+            series_id: created.series.id.clone(),
+            title: "The Sealing".into(),
+            note_type: NoteType::Timeline,
+            content: "".into(),
+        })
+        .unwrap();
+
+        let series = get_series(&created.project_dir).unwrap();
+        assert_eq!(series.note_ids, vec![note.id.clone()]);
+
+        delete_note(&created.project_dir, &note.id).unwrap();
+
+        let series = get_series(&created.project_dir).unwrap();
+        assert!(series.note_ids.is_empty());
     }
 
     #[test]

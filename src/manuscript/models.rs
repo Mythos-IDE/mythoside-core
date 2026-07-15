@@ -9,6 +9,21 @@ pub struct Series {
     pub title: String,
     pub description: String,
     pub created_at: String,
+    /// Convenience index of this series' entities, kept in sync (best-effort)
+    /// by the create_*/delete_* commands — NOT the source of truth. Listing
+    /// (list_books/list_characters/etc.) still scans the actual directories;
+    /// this is just a human-readable summary living in the same file, so a
+    /// glance at series.yaml shows what belongs to it without walking the
+    /// filesystem. `#[serde(default)]` so series.yaml files written before
+    /// this field existed still parse.
+    #[serde(default)]
+    pub book_ids: Vec<String>,
+    #[serde(default)]
+    pub character_ids: Vec<String>,
+    #[serde(default)]
+    pub location_ids: Vec<String>,
+    #[serde(default)]
+    pub note_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]

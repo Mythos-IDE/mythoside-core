@@ -229,9 +229,23 @@ mod tests {
             title: "The Aethelgard Chronicles".into(),
             description: "An epic fantasy series.".into(),
             created_at: "2024-07-03T10:26:40Z".to_string(),
+            book_ids: vec!["book-1".into()],
+            character_ids: vec!["char-1".into(), "char-2".into()],
+            location_ids: vec![],
+            note_ids: vec![],
         };
         let parsed = parse_series(&serialize_series(&series).unwrap()).unwrap();
         assert_eq!(parsed, series);
+    }
+
+    #[test]
+    fn parses_a_series_yaml_missing_the_index_fields_as_empty_lists() {
+        let text = "id: series-1\ntitle: The Aethelgard Chronicles\ndescription: \"\"\ncreatedAt: \"2024-07-03T10:26:40Z\"";
+        let series = parse_series(text).unwrap();
+        assert!(series.book_ids.is_empty());
+        assert!(series.character_ids.is_empty());
+        assert!(series.location_ids.is_empty());
+        assert!(series.note_ids.is_empty());
     }
 
     #[test]
