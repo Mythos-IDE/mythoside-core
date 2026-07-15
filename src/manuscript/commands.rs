@@ -160,6 +160,44 @@ fn delete_entity_by_id<T>(
     ))
 }
 
+/// `delete_entity_by_id`'s update counterpart: scans `dir` for the file
+/// whose parsed id matches `target_id`, applies `mutate` to the parsed
+/// value, and rewrites it in place at the same path. Errors if no match is
+/// found — same "one corrupt file shouldn't hide everything else" scanning
+/// as `scan_entities`, but an update targets exactly one known id, so a miss
+/// here is a real error, not just a warning.
+fn update_entity_by_id<T>(
+    dir: &Path,
+    extension: &str,
+    parse: impl Fn(&str) -> Result<T, String>,
+    serialize: impl Fn(&T) -> Result<String, String>,
+    id_of: impl Fn(&T) -> &str,
+    target_id: &str,
+    mutate: impl FnOnce(&mut T),
+) -> Result<T, String> {
+    let entries = fs::read_dir(dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some(extension) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(mut item) = parse(&text) else { continue };
+        if id_of(&item) == target_id {
+            mutate(&mut item);
+            let contents = serialize(&item)?;
+            fs::write(&path, contents).map_err(|e| e.to_string())?;
+            return Ok(item);
+        }
+    }
+    Err(format!(
+        "no entity with id {target_id} found in {}",
+        dir.display()
+    ))
+}
+
 pub fn delete_character(project_dir: &str, character_id: &str) -> Result<(), String> {
     let characters_dir = Path::new(project_dir).join("characters");
     delete_entity_by_id(
@@ -175,6 +213,41 @@ pub fn delete_character(project_dir: &str, character_id: &str) -> Result<(), Str
     });
 
     Ok(())
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCharacterInput {
+    pub project_dir: String,
+    pub character_id: String,
+    pub name: String,
+    pub role: String,
+    #[serde(default)]
+    pub bio: String,
+    #[serde(default)]
+    pub attributes: HashMap<String, String>,
+}
+
+/// Replaces every editable field at once, unlike Chapter's
+/// title-only/content-only split — this isn't an autosave hot path (an
+/// explicit save from a form, submitted once), so there's no reason to
+/// narrow it the way `update_chapter_content` is narrowed.
+pub fn update_character(input: UpdateCharacterInput) -> Result<Character, String> {
+    let characters_dir = Path::new(&input.project_dir).join("characters");
+    update_entity_by_id(
+        &characters_dir,
+        "md",
+        format::parse_character,
+        format::serialize_character,
+        |c| &c.id,
+        &input.character_id,
+        |character| {
+            character.name = input.name;
+            character.role = input.role;
+            character.bio = input.bio;
+            character.attributes = input.attributes;
+        },
+    )
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -249,6 +322,32 @@ pub fn delete_location(project_dir: &str, location_id: &str) -> Result<(), Strin
 
 #[derive(Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateLocationInput {
+    pub project_dir: String,
+    pub location_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+pub fn update_location(input: UpdateLocationInput) -> Result<Location, String> {
+    let locations_dir = Path::new(&input.project_dir).join("locations");
+    update_entity_by_id(
+        &locations_dir,
+        "md",
+        format::parse_location,
+        format::serialize_location,
+        |l| &l.id,
+        &input.location_id,
+        |location| {
+            location.name = input.name;
+            location.description = input.description;
+        },
+    )
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateNoteInput {
     pub project_dir: String,
     pub series_id: String,
@@ -310,6 +409,35 @@ pub fn delete_note(project_dir: &str, note_id: &str) -> Result<(), String> {
     });
 
     Ok(())
+}
+
+#[derive(Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNoteInput {
+    pub project_dir: String,
+    pub note_id: String,
+    pub title: String,
+    #[serde(rename = "type")]
+    pub note_type: NoteType,
+    #[serde(default)]
+    pub content: String,
+}
+
+pub fn update_note(input: UpdateNoteInput) -> Result<Note, String> {
+    let notes_dir = Path::new(&input.project_dir).join("notes");
+    update_entity_by_id(
+        &notes_dir,
+        "md",
+        format::parse_note,
+        format::serialize_note,
+        |n| &n.id,
+        &input.note_id,
+        |note| {
+            note.title = input.title;
+            note.note_type = input.note_type;
+            note.content = input.content;
+        },
+    )
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -1160,6 +1288,30 @@ mod tests {
     }
 
     #[test]
+    fn updates_a_locations_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+        let location = create_location(CreateLocationInput {
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
+            name: "Aethelgard".into(),
+            description: "Original description.".into(),
+        })
+        .unwrap();
+
+        let updated = update_location(UpdateLocationInput {
+            project_dir: project_dir.clone(),
+            location_id: location.id.clone(),
+            name: "Aethelgard".into(),
+            description: "Revised description.".into(),
+        })
+        .expect("should update the location");
+
+        assert_eq!(updated.description, "Revised description.");
+        assert_eq!(updated.id, location.id);
+    }
+
+    #[test]
     fn lists_characters_for_a_series() {
         let dir = tempfile::tempdir().unwrap();
         let project_dir = dir.path().to_string_lossy().into_owned();
@@ -1197,6 +1349,54 @@ mod tests {
 
         let result = list_characters(&project_dir).unwrap();
         assert!(result.characters.is_empty());
+    }
+
+    #[test]
+    fn updates_a_characters_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+        let character = create_character(CreateCharacterInput {
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
+            name: "Lyra Vance".into(),
+            role: "Protagonist".into(),
+            bio: "Original bio.".into(),
+            attributes: HashMap::new(),
+        })
+        .unwrap();
+
+        let updated = update_character(UpdateCharacterInput {
+            project_dir: project_dir.clone(),
+            character_id: character.id.clone(),
+            name: "Lyra Vance".into(),
+            role: "Antagonist".into(),
+            bio: "Revised bio.".into(),
+            attributes: HashMap::from([("home".to_string(), "Aethelgard".to_string())]),
+        })
+        .expect("should update the character");
+
+        assert_eq!(updated.role, "Antagonist");
+        assert_eq!(updated.bio, "Revised bio.");
+        assert_eq!(updated.id, character.id);
+
+        let listed = list_characters(&project_dir).unwrap();
+        assert_eq!(listed.characters[0].role, "Antagonist");
+    }
+
+    #[test]
+    fn update_character_fails_when_no_character_has_that_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+
+        assert!(update_character(UpdateCharacterInput {
+            project_dir,
+            character_id: "not-a-real-id".into(),
+            name: "Nobody".into(),
+            role: "".into(),
+            bio: "".into(),
+            attributes: HashMap::new(),
+        })
+        .is_err());
     }
 
     #[test]
@@ -1286,6 +1486,33 @@ mod tests {
 
         let result = list_notes(&project_dir).unwrap();
         assert!(result.notes.is_empty());
+    }
+
+    #[test]
+    fn updates_a_notes_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_dir = dir.path().to_string_lossy().into_owned();
+        let note = create_note(CreateNoteInput {
+            project_dir: project_dir.clone(),
+            series_id: "series-1".into(),
+            title: "The Sealing".into(),
+            note_type: NoteType::Timeline,
+            content: "Original content.".into(),
+        })
+        .unwrap();
+
+        let updated = update_note(UpdateNoteInput {
+            project_dir: project_dir.clone(),
+            note_id: note.id.clone(),
+            title: "The Sealing: Revised".into(),
+            note_type: NoteType::Lore,
+            content: "Revised content.".into(),
+        })
+        .expect("should update the note");
+
+        assert_eq!(updated.title, "The Sealing: Revised");
+        assert_eq!(updated.note_type, NoteType::Lore);
+        assert_eq!(updated.content, "Revised content.");
     }
 
     #[test]
