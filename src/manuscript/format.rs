@@ -1,4 +1,4 @@
-use super::models::{Book, Chapter, Character, Location, Note, NoteType, Scene, Series};
+use super::models::{Book, Chapter, Character, Location, Note, NoteType, Series};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -55,21 +55,12 @@ pub fn serialize_book(book: &Book) -> Result<String, String> {
     serialize_yaml(book)
 }
 
-// --- Chapter: .../chapters/<order>-<chapter-slug>/chapter.yaml ---
-pub fn parse_chapter(text: &str) -> Result<Chapter, String> {
-    parse_yaml(text)
-}
-
-pub fn serialize_chapter(chapter: &Chapter) -> Result<String, String> {
-    serialize_yaml(chapter)
-}
-
-// --- Scene: .../chapters/<...>/<order>-<scene-slug>.md ---
+// --- Chapter: .../chapters/<order>-<chapter-slug>.md ---
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SceneMeta {
+struct ChapterMeta {
     id: String,
-    chapter_id: String,
+    book_id: String,
     title: String,
     order: u32,
     #[serde(default)]
@@ -79,12 +70,12 @@ struct SceneMeta {
     created_at: String,
 }
 
-pub fn parse_scene(file_text: &str) -> Result<Scene, String> {
+pub fn parse_chapter(file_text: &str) -> Result<Chapter, String> {
     let (frontmatter, body) = split_frontmatter(file_text)?;
-    let meta: SceneMeta = parse_yaml(frontmatter)?;
-    Ok(Scene {
+    let meta: ChapterMeta = parse_yaml(frontmatter)?;
+    Ok(Chapter {
         id: meta.id,
-        chapter_id: meta.chapter_id,
+        book_id: meta.book_id,
         title: meta.title,
         order: meta.order,
         tags: meta.tags,
@@ -94,18 +85,18 @@ pub fn parse_scene(file_text: &str) -> Result<Scene, String> {
     })
 }
 
-pub fn serialize_scene(scene: &Scene) -> Result<String, String> {
-    let meta = SceneMeta {
-        id: scene.id.clone(),
-        chapter_id: scene.chapter_id.clone(),
-        title: scene.title.clone(),
-        order: scene.order,
-        tags: scene.tags.clone(),
-        characters: scene.characters.clone(),
-        created_at: scene.created_at.clone(),
+pub fn serialize_chapter(chapter: &Chapter) -> Result<String, String> {
+    let meta = ChapterMeta {
+        id: chapter.id.clone(),
+        book_id: chapter.book_id.clone(),
+        title: chapter.title.clone(),
+        order: chapter.order,
+        tags: chapter.tags.clone(),
+        characters: chapter.characters.clone(),
+        created_at: chapter.created_at.clone(),
     };
     let yaml = serialize_yaml(&meta)?;
-    Ok(join_frontmatter(&yaml, &scene.content))
+    Ok(join_frontmatter(&yaml, &chapter.content))
 }
 
 // --- Character: .../characters/<slug>.md ---
@@ -263,24 +254,11 @@ mod tests {
     }
 
     #[test]
-    fn round_trips_a_chapter_through_chapter_yaml() {
+    fn round_trips_a_chapter_through_markdown_and_frontmatter() {
         let chapter = Chapter {
             id: "chapter-1".into(),
             book_id: "book-1".into(),
             title: "The Obsidian Gate".into(),
-            order: 1,
-            created_at: "2024-07-03T10:26:40Z".to_string(),
-        };
-        let parsed = parse_chapter(&serialize_chapter(&chapter).unwrap()).unwrap();
-        assert_eq!(parsed, chapter);
-    }
-
-    #[test]
-    fn round_trips_a_scene_through_markdown_and_frontmatter() {
-        let scene = Scene {
-            id: "scene-1".into(),
-            chapter_id: "chapter-1".into(),
-            title: "The Void Begins".into(),
             order: 1,
             tags: vec!["action".into(), "reveal".into()],
             characters: vec!["lyra-vance".into(), "silas-thorne".into()],
@@ -288,10 +266,18 @@ mod tests {
             content: "The air in the chamber was heavy with the scent of ancient dust and ozone."
                 .into(),
         };
-        let file = serialize_scene(&scene).unwrap();
+        let file = serialize_chapter(&chapter).unwrap();
         assert!(file.contains("---"));
         assert!(file.contains("The air in the chamber"));
-        assert_eq!(parse_scene(&file).unwrap(), scene);
+        assert_eq!(parse_chapter(&file).unwrap(), chapter);
+    }
+
+    #[test]
+    fn defaults_optional_chapter_fields_when_frontmatter_omits_them() {
+        let file = "---\nid: chapter-2\nbookId: book-1\ntitle: Bare Chapter\norder: 2\ncreatedAt: \"2024-07-03T10:26:40Z\"\n---\nJust prose.";
+        let chapter = parse_chapter(file).unwrap();
+        assert!(chapter.tags.is_empty());
+        assert!(chapter.characters.is_empty());
     }
 
     #[test]
@@ -353,14 +339,6 @@ mod tests {
         let file = serialize_note(&note).unwrap();
         assert!(file.contains("type: timeline"));
         assert_eq!(parse_note(&file).unwrap(), note);
-    }
-
-    #[test]
-    fn defaults_optional_scene_fields_when_frontmatter_omits_them() {
-        let file = "---\nid: scene-2\nchapterId: chapter-1\ntitle: Bare Scene\norder: 2\ncreatedAt: \"2024-07-03T10:26:40Z\"\n---\nJust prose.";
-        let scene = parse_scene(file).unwrap();
-        assert!(scene.tags.is_empty());
-        assert!(scene.characters.is_empty());
     }
 
     #[test]

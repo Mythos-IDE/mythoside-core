@@ -44,16 +44,6 @@ pub struct Chapter {
     pub book_id: String,
     pub title: String,
     pub order: u32,
-    pub created_at: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct Scene {
-    pub id: String,
-    pub chapter_id: String,
-    pub title: String,
-    pub order: u32,
     pub tags: Vec<String>,
     pub characters: Vec<String>,
     pub created_at: String,

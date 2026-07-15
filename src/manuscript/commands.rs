@@ -1,5 +1,5 @@
 use super::format;
-use super::models::{Book, Chapter, Character, Location, Note, NoteType, Scene, Series};
+use super::models::{Book, Chapter, Character, Location, Note, NoteType, Series};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -640,21 +640,20 @@ pub fn delete_book(book_dir: &str) -> Result<(), String> {
     Ok(())
 }
 
-// --- Chapter: <book_dir>/chapters/<order>-<slug>/chapter.yaml ---
-// --- Scene: <chapter_dir>/<order>-<slug>.md ---
-// Book-scoped and chapter-scoped respectively, unlike Character/Location/
-// Note: a chapter belongs to exactly one book, a scene to exactly one
-// chapter, so there's no "recurs across books" reason to hoist these to the
-// series level. No id suffix on their folder/file names either — `order`
+// --- Chapter: <book_dir>/chapters/<order>-<slug>.md ---
+// Book-scoped, unlike Character/Location/Note: a chapter belongs to exactly
+// one book, so there's no "recurs across books" reason to hoist it to the
+// series level. No id suffix on the file name either — `order`
 // (auto-assigned, max-existing+1, same reasoning as `next_book_order`) is
-// already unique within its parent, so two chapters/scenes sharing a title
-// still can't collide.
+// already unique within its parent, so two chapters sharing a title still
+// can't collide. A chapter carries its own prose (`content`) directly —
+// there is no separate scene layer.
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ChapterHandle {
     pub chapter: Chapter,
-    pub chapter_dir: String,
+    pub chapter_path: String,
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -663,6 +662,12 @@ pub struct CreateChapterInput {
     pub book_dir: String,
     pub book_id: String,
     pub title: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub characters: Vec<String>,
+    #[serde(default)]
+    pub content: String,
 }
 
 #[derive(Serialize, Deserialize, Type)]
@@ -674,34 +679,27 @@ pub struct ListChaptersOutput {
 
 pub fn list_chapters(book_dir: &str) -> Result<ListChaptersOutput, String> {
     let chapters_dir = Path::new(book_dir).join("chapters");
-    let entries = match fs::read_dir(&chapters_dir) {
-        Ok(entries) => entries,
-        // No chapters/ subfolder yet — nothing created, not an error.
-        Err(_) => {
-            return Ok(ListChaptersOutput {
-                chapters: Vec::new(),
-                warnings: Vec::new(),
-            })
-        }
-    };
-
     let mut chapters = Vec::new();
     let mut warnings = Vec::new();
+
+    let Ok(entries) = fs::read_dir(&chapters_dir) else {
+        // No chapters/ subfolder yet — nothing created, not an error.
+        return Ok(ListChaptersOutput { chapters, warnings });
+    };
     for entry in entries.flatten() {
-        let chapter_dir = entry.path();
-        let chapter_yaml = chapter_dir.join("chapter.yaml");
-        if !chapter_yaml.is_file() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
             continue;
         }
-        match fs::read_to_string(&chapter_yaml)
+        match fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|text| format::parse_chapter(&text))
         {
             Ok(chapter) => chapters.push(ChapterHandle {
                 chapter,
-                chapter_dir: chapter_dir.to_string_lossy().into_owned(),
+                chapter_path: path.to_string_lossy().into_owned(),
             }),
-            Err(e) => warnings.push(format!("{}: {e}", chapter_yaml.display())),
+            Err(e) => warnings.push(format!("{}: {e}", path.display())),
         }
     }
     chapters.sort_by_key(|handle| handle.chapter.order);
@@ -722,68 +720,12 @@ pub fn create_chapter(input: CreateChapterInput) -> Result<ChapterHandle, String
         + 1;
 
     let slug = slugify(&input.title);
-    let chapter_dir = Path::new(&input.book_dir)
-        .join("chapters")
-        .join(format!("{order}-{slug}"));
+    let chapters_dir = Path::new(&input.book_dir).join("chapters");
+    let file_path = chapters_dir.join(format!("{order}-{slug}.md"));
 
     let chapter = Chapter {
         id: Uuid::new_v4().to_string(),
         book_id: input.book_id,
-        title: input.title,
-        order,
-        created_at: now_iso8601(),
-    };
-
-    fs::create_dir_all(&chapter_dir).map_err(|e| e.to_string())?;
-    let contents = format::serialize_chapter(&chapter)?;
-    fs::write(chapter_dir.join("chapter.yaml"), contents).map_err(|e| e.to_string())?;
-
-    Ok(ChapterHandle {
-        chapter,
-        chapter_dir: chapter_dir.to_string_lossy().into_owned(),
-    })
-}
-
-/// Moves the chapter folder — and every scene in it — to the OS trash (see
-/// `delete_series`'s doc comment for the recoverable-delete rationale).
-pub fn delete_chapter(chapter_dir: &str) -> Result<(), String> {
-    trash::delete(chapter_dir).map_err(|e| e.to_string())
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SceneHandle {
-    pub scene: Scene,
-    pub scene_path: String,
-}
-
-#[derive(Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateSceneInput {
-    pub chapter_dir: String,
-    pub chapter_id: String,
-    pub title: String,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    #[serde(default)]
-    pub characters: Vec<String>,
-    #[serde(default)]
-    pub content: String,
-}
-
-pub fn create_scene(input: CreateSceneInput) -> Result<SceneHandle, String> {
-    let chapter_dir = Path::new(&input.chapter_dir);
-
-    // Same max-existing+1 order assignment as create_chapter/create_book.
-    let (existing_scenes, _) = scan_entities(chapter_dir, "md", format::parse_scene);
-    let order = existing_scenes.iter().map(|s| s.order).max().unwrap_or(0) + 1;
-
-    let slug = slugify(&input.title);
-    let file_path = chapter_dir.join(format!("{order}-{slug}.md"));
-
-    let scene = Scene {
-        id: Uuid::new_v4().to_string(),
-        chapter_id: input.chapter_id,
         title: input.title,
         order,
         tags: input.tags,
@@ -792,120 +734,68 @@ pub fn create_scene(input: CreateSceneInput) -> Result<SceneHandle, String> {
         content: input.content,
     };
 
-    let contents = format::serialize_scene(&scene)?;
+    fs::create_dir_all(&chapters_dir).map_err(|e| e.to_string())?;
+    let contents = format::serialize_chapter(&chapter)?;
     fs::write(&file_path, contents).map_err(|e| e.to_string())?;
 
-    Ok(SceneHandle {
-        scene,
-        scene_path: file_path.to_string_lossy().into_owned(),
+    Ok(ChapterHandle {
+        chapter,
+        chapter_path: file_path.to_string_lossy().into_owned(),
     })
 }
 
-#[derive(Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ListScenesOutput {
-    pub scenes: Vec<SceneHandle>,
-    pub warnings: Vec<String>,
-}
-
-pub fn list_scenes(chapter_dir: &str) -> Result<ListScenesOutput, String> {
-    let dir = Path::new(chapter_dir);
-    let mut scenes = Vec::new();
-    let mut warnings = Vec::new();
-
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Ok(ListScenesOutput { scenes, warnings });
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        match fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|text| format::parse_scene(&text))
-        {
-            Ok(scene) => scenes.push(SceneHandle {
-                scene,
-                scene_path: path.to_string_lossy().into_owned(),
-            }),
-            Err(e) => warnings.push(format!("{}: {e}", path.display())),
-        }
-    }
-    scenes.sort_by_key(|handle| handle.scene.order);
-
-    Ok(ListScenesOutput { scenes, warnings })
+/// Moves the chapter file to the OS trash (see `delete_series`'s doc
+/// comment for the recoverable-delete rationale).
+pub fn delete_chapter(chapter_path: &str) -> Result<(), String> {
+    trash::delete(chapter_path).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateSceneInput {
-    pub scene_path: String,
+pub struct UpdateChapterContentInput {
+    pub chapter_path: String,
     pub content: String,
 }
 
 /// Only replaces the prose body — title/tags/characters are untouched. This
-/// is what the scene editor's autosave calls on every change; a narrow
-/// "just the content" input keeps that hot path simple, mirroring
-/// `update_series`'s narrow title/description-only input.
-pub fn update_scene(input: UpdateSceneInput) -> Result<Scene, String> {
-    let path = Path::new(&input.scene_path);
+/// is what the editor's autosave calls on every change; a narrow "just the
+/// content" input keeps that hot path simple, mirroring `update_series`'s
+/// narrow title/description-only input.
+pub fn update_chapter_content(input: UpdateChapterContentInput) -> Result<Chapter, String> {
+    let path = Path::new(&input.chapter_path);
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut scene = format::parse_scene(&text)?;
-    scene.content = input.content;
-
-    let contents = format::serialize_scene(&scene)?;
-    fs::write(path, contents).map_err(|e| e.to_string())?;
-
-    Ok(scene)
-}
-
-pub fn delete_scene(scene_path: &str) -> Result<(), String> {
-    trash::delete(scene_path).map_err(|e| e.to_string())
-}
-
-#[derive(Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateChapterInput {
-    pub chapter_dir: String,
-    pub title: String,
-}
-
-/// Only the title — the folder name (`<order>-<slug>`) is frozen at
-/// creation and never renamed, so a stored `chapter_dir` (e.g. in the
-/// frontend's `currentChapter`) never goes stale from a rename.
-pub fn update_chapter(input: UpdateChapterInput) -> Result<Chapter, String> {
-    let chapter_yaml = Path::new(&input.chapter_dir).join("chapter.yaml");
-    let text = fs::read_to_string(&chapter_yaml).map_err(|e| e.to_string())?;
     let mut chapter = format::parse_chapter(&text)?;
-    chapter.title = input.title;
+    chapter.content = input.content;
 
     let contents = format::serialize_chapter(&chapter)?;
-    fs::write(&chapter_yaml, contents).map_err(|e| e.to_string())?;
+    fs::write(path, contents).map_err(|e| e.to_string())?;
 
     Ok(chapter)
 }
 
 #[derive(Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct RenameSceneInput {
-    pub scene_path: String,
+pub struct UpdateChapterInput {
+    pub chapter_path: String,
     pub title: String,
 }
 
-/// A separate command from `update_scene` on purpose — that one only
-/// touches `content` and is called on every autosave tick, so it stays
-/// narrow; renaming is a distinct, infrequent action.
-pub fn rename_scene(input: RenameSceneInput) -> Result<Scene, String> {
-    let path = Path::new(&input.scene_path);
+/// Only the title — the file name (`<order>-<slug>.md`) is frozen at
+/// creation and never renamed, so a stored `chapter_path` (e.g. in the
+/// frontend's `currentChapter`) never goes stale from a rename. A separate
+/// command from `update_chapter_content` on purpose — that one only touches
+/// `content` and is called on every autosave tick, so it stays narrow;
+/// renaming is a distinct, infrequent action.
+pub fn update_chapter(input: UpdateChapterInput) -> Result<Chapter, String> {
+    let path = Path::new(&input.chapter_path);
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut scene = format::parse_scene(&text)?;
-    scene.title = input.title;
+    let mut chapter = format::parse_chapter(&text)?;
+    chapter.title = input.title;
 
-    let contents = format::serialize_scene(&scene)?;
+    let contents = format::serialize_chapter(&chapter)?;
     fs::write(path, contents).map_err(|e| e.to_string())?;
 
-    Ok(scene)
+    Ok(chapter)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Type)]
@@ -915,21 +805,17 @@ pub enum MoveDirection {
     Down,
 }
 
-fn write_chapter_yaml(handle: &ChapterHandle) -> Result<(), String> {
+fn write_chapter(handle: &ChapterHandle) -> Result<(), String> {
     let contents = format::serialize_chapter(&handle.chapter)?;
-    fs::write(
-        Path::new(&handle.chapter_dir).join("chapter.yaml"),
-        contents,
-    )
-    .map_err(|e| e.to_string())
+    fs::write(&handle.chapter_path, contents).map_err(|e| e.to_string())
 }
 
 /// Swaps `order` with the adjacent chapter (previous for `Up`, next for
 /// `Down`) rather than reassigning every chapter's order — a no-op, not an
-/// error, if already at that edge (nothing to swap with). The folder name
+/// error, if already at that edge (nothing to swap with). The file name
 /// (which embeds the *old* order) is deliberately left alone, same
 /// freeze-at-creation reasoning as `update_chapter` — only the `order`
-/// field inside chapter.yaml changes, so `list_chapters` re-sorts correctly
+/// field inside the file changes, so `list_chapters` re-sorts correctly
 /// without any path needing to change.
 pub fn move_chapter(
     book_dir: &str,
@@ -956,44 +842,8 @@ pub fn move_chapter(
     chapters[index].chapter.order = b_order;
     chapters[neighbor_index].chapter.order = a_order;
 
-    write_chapter_yaml(&chapters[index])?;
-    write_chapter_yaml(&chapters[neighbor_index])?;
-    Ok(())
-}
-
-fn write_scene(handle: &SceneHandle) -> Result<(), String> {
-    let contents = format::serialize_scene(&handle.scene)?;
-    fs::write(&handle.scene_path, contents).map_err(|e| e.to_string())
-}
-
-/// Scene counterpart of `move_chapter` — same swap-with-neighbor approach.
-pub fn move_scene(
-    chapter_dir: &str,
-    scene_id: &str,
-    direction: MoveDirection,
-) -> Result<(), String> {
-    let mut scenes = list_scenes(chapter_dir)?.scenes;
-    let index = scenes
-        .iter()
-        .position(|handle| handle.scene.id == scene_id)
-        .ok_or_else(|| format!("no scene with id {scene_id} found"))?;
-
-    let neighbor_index = match direction {
-        MoveDirection::Up => index.checked_sub(1),
-        MoveDirection::Down if index + 1 < scenes.len() => Some(index + 1),
-        MoveDirection::Down => None,
-    };
-    let Some(neighbor_index) = neighbor_index else {
-        return Ok(());
-    };
-
-    let a_order = scenes[index].scene.order;
-    let b_order = scenes[neighbor_index].scene.order;
-    scenes[index].scene.order = b_order;
-    scenes[neighbor_index].scene.order = a_order;
-
-    write_scene(&scenes[index])?;
-    write_scene(&scenes[neighbor_index])?;
+    write_chapter(&chapters[index])?;
+    write_chapter(&chapters[neighbor_index])?;
     Ok(())
 }
 
@@ -1642,20 +1492,22 @@ mod tests {
     }
 
     #[test]
-    fn creates_a_chapter_with_auto_assigned_order_and_slugified_subfolder() {
+    fn creates_a_chapter_with_auto_assigned_order_and_slugified_filename() {
         let dir = tempfile::tempdir().unwrap();
         let handle = create_chapter(CreateChapterInput {
             book_dir: dir.path().to_string_lossy().into_owned(),
             book_id: "book-1".into(),
             title: "The Obsidian Gate".into(),
+            tags: vec!["action".into()],
+            characters: vec!["lyra-vance".into()],
+            content: "The air in the chamber was heavy with dust.".into(),
         })
         .expect("should create the chapter");
 
         assert_eq!(handle.chapter.order, 1);
-        assert!(handle.chapter_dir.contains("1-the-obsidian-gate"));
+        assert!(handle.chapter_path.contains("1-the-obsidian-gate.md"));
 
-        let written =
-            fs::read_to_string(Path::new(&handle.chapter_dir).join("chapter.yaml")).unwrap();
+        let written = fs::read_to_string(&handle.chapter_path).unwrap();
         assert_eq!(format::parse_chapter(&written).unwrap(), handle.chapter);
     }
 
@@ -1666,6 +1518,9 @@ mod tests {
             book_dir: dir.path().to_string_lossy().into_owned(),
             book_id: "book-1".into(),
             title: title.into(),
+            tags: vec![],
+            characters: vec![],
+            content: "".into(),
         };
 
         let first = create_chapter(input("The Obsidian Gate")).unwrap();
@@ -1683,6 +1538,9 @@ mod tests {
             book_dir: book_dir.clone(),
             book_id: "book-1".into(),
             title: title.into(),
+            tags: vec![],
+            characters: vec![],
+            content: "".into(),
         };
         create_chapter(input("The Obsidian Gate")).unwrap();
         create_chapter(input("The Sealing")).unwrap();
@@ -1710,12 +1568,15 @@ mod tests {
             book_dir: dir.path().to_string_lossy().into_owned(),
             book_id: "book-1".into(),
             title: "The Obsidian Gate".into(),
+            tags: vec![],
+            characters: vec![],
+            content: "".into(),
         })
         .unwrap();
 
-        delete_chapter(&handle.chapter_dir).expect("should delete the chapter");
+        delete_chapter(&handle.chapter_path).expect("should delete the chapter");
 
-        assert!(!Path::new(&handle.chapter_dir).exists());
+        assert!(!Path::new(&handle.chapter_path).exists());
     }
 
     #[test]
@@ -1726,6 +1587,9 @@ mod tests {
             book_dir: book_dir.clone(),
             book_id: "book-1".into(),
             title: title.into(),
+            tags: vec![],
+            characters: vec![],
+            content: "".into(),
         };
 
         let first = create_chapter(input("The Obsidian Gate")).unwrap();
@@ -1733,7 +1597,7 @@ mod tests {
         assert_eq!(first.chapter.order, 1);
         assert_eq!(second.chapter.order, 2);
 
-        delete_chapter(&second.chapter_dir).unwrap();
+        delete_chapter(&second.chapter_path).unwrap();
 
         let third = create_chapter(input("The Last Ember")).unwrap();
         assert_eq!(
@@ -1743,118 +1607,30 @@ mod tests {
     }
 
     #[test]
-    fn creates_a_scene_with_auto_assigned_order_and_slugified_filename() {
+    fn updates_a_chapters_content_only() {
         let dir = tempfile::tempdir().unwrap();
-        let handle = create_scene(CreateSceneInput {
-            chapter_dir: dir.path().to_string_lossy().into_owned(),
-            chapter_id: "chapter-1".into(),
-            title: "The Void Begins".into(),
-            tags: vec!["action".into()],
-            characters: vec!["lyra-vance".into()],
-            content: "The air in the chamber was heavy with dust.".into(),
-        })
-        .expect("should create the scene");
-
-        assert_eq!(handle.scene.order, 1);
-        assert!(handle.scene_path.contains("1-the-void-begins.md"));
-
-        let written = fs::read_to_string(&handle.scene_path).unwrap();
-        assert_eq!(format::parse_scene(&written).unwrap(), handle.scene);
-    }
-
-    #[test]
-    fn create_scene_increments_order_for_each_new_scene() {
-        let dir = tempfile::tempdir().unwrap();
-        let input = |title: &str| CreateSceneInput {
-            chapter_dir: dir.path().to_string_lossy().into_owned(),
-            chapter_id: "chapter-1".into(),
-            title: title.into(),
-            tags: vec![],
-            characters: vec![],
-            content: "".into(),
-        };
-
-        let first = create_scene(input("The Void Begins")).unwrap();
-        let second = create_scene(input("The Reveal")).unwrap();
-
-        assert_eq!(first.scene.order, 1);
-        assert_eq!(second.scene.order, 2);
-    }
-
-    #[test]
-    fn lists_scenes_sorted_by_order() {
-        let dir = tempfile::tempdir().unwrap();
-        let chapter_dir = dir.path().to_string_lossy().into_owned();
-        let input = |title: &str| CreateSceneInput {
-            chapter_dir: chapter_dir.clone(),
-            chapter_id: "chapter-1".into(),
-            title: title.into(),
-            tags: vec![],
-            characters: vec![],
-            content: "".into(),
-        };
-        create_scene(input("The Void Begins")).unwrap();
-        create_scene(input("The Reveal")).unwrap();
-
-        let result = list_scenes(&chapter_dir).expect("should list scenes");
-
-        assert!(result.warnings.is_empty());
-        assert_eq!(result.scenes.len(), 2);
-        assert_eq!(result.scenes[0].scene.title, "The Void Begins");
-        assert_eq!(result.scenes[1].scene.title, "The Reveal");
-    }
-
-    #[test]
-    fn list_scenes_is_empty_when_the_chapter_has_none_yet() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = list_scenes(&dir.path().to_string_lossy()).expect("should not fail");
-        assert!(result.scenes.is_empty());
-        assert!(result.warnings.is_empty());
-    }
-
-    #[test]
-    fn updates_a_scenes_content_only() {
-        let dir = tempfile::tempdir().unwrap();
-        let handle = create_scene(CreateSceneInput {
-            chapter_dir: dir.path().to_string_lossy().into_owned(),
-            chapter_id: "chapter-1".into(),
-            title: "The Void Begins".into(),
+        let handle = create_chapter(CreateChapterInput {
+            book_dir: dir.path().to_string_lossy().into_owned(),
+            book_id: "book-1".into(),
+            title: "The Obsidian Gate".into(),
             tags: vec!["action".into()],
             characters: vec![],
             content: "Original prose.".into(),
         })
         .unwrap();
 
-        let updated = update_scene(UpdateSceneInput {
-            scene_path: handle.scene_path.clone(),
+        let updated = update_chapter_content(UpdateChapterContentInput {
+            chapter_path: handle.chapter_path.clone(),
             content: "Revised prose.".into(),
         })
-        .expect("should update the scene");
+        .expect("should update the chapter");
 
         assert_eq!(updated.content, "Revised prose.");
-        assert_eq!(updated.title, "The Void Begins");
+        assert_eq!(updated.title, "The Obsidian Gate");
         assert_eq!(updated.tags, vec!["action".to_string()]);
 
-        let written = fs::read_to_string(&handle.scene_path).unwrap();
-        assert_eq!(format::parse_scene(&written).unwrap(), updated);
-    }
-
-    #[test]
-    fn deletes_a_scene() {
-        let dir = tempfile::tempdir().unwrap();
-        let handle = create_scene(CreateSceneInput {
-            chapter_dir: dir.path().to_string_lossy().into_owned(),
-            chapter_id: "chapter-1".into(),
-            title: "The Void Begins".into(),
-            tags: vec![],
-            characters: vec![],
-            content: "".into(),
-        })
-        .unwrap();
-
-        delete_scene(&handle.scene_path).expect("should delete the scene");
-
-        assert!(!Path::new(&handle.scene_path).exists());
+        let written = fs::read_to_string(&handle.chapter_path).unwrap();
+        assert_eq!(format::parse_chapter(&written).unwrap(), updated);
     }
 
     #[test]
@@ -1864,44 +1640,23 @@ mod tests {
             book_dir: dir.path().to_string_lossy().into_owned(),
             book_id: "book-1".into(),
             title: "The Obsidian Gate".into(),
+            tags: vec![],
+            characters: vec![],
+            content: "".into(),
         })
         .unwrap();
-        let original_dir = handle.chapter_dir.clone();
+        let original_path = handle.chapter_path.clone();
 
         let updated = update_chapter(UpdateChapterInput {
-            chapter_dir: handle.chapter_dir.clone(),
+            chapter_path: handle.chapter_path.clone(),
             title: "The Obsidian Gate: Revised".into(),
         })
         .expect("should update the chapter");
 
         assert_eq!(updated.title, "The Obsidian Gate: Revised");
         assert_eq!(updated.id, handle.chapter.id);
-        // Folder name is frozen at creation, not renamed.
-        assert!(Path::new(&original_dir).exists());
-    }
-
-    #[test]
-    fn renames_a_scenes_title_only() {
-        let dir = tempfile::tempdir().unwrap();
-        let handle = create_scene(CreateSceneInput {
-            chapter_dir: dir.path().to_string_lossy().into_owned(),
-            chapter_id: "chapter-1".into(),
-            title: "The Void Begins".into(),
-            tags: vec![],
-            characters: vec![],
-            content: "Original prose.".into(),
-        })
-        .unwrap();
-
-        let renamed = rename_scene(RenameSceneInput {
-            scene_path: handle.scene_path.clone(),
-            title: "The Void Begins: Revised".into(),
-        })
-        .expect("should rename the scene");
-
-        assert_eq!(renamed.title, "The Void Begins: Revised");
-        assert_eq!(renamed.content, "Original prose.");
-        assert!(Path::new(&handle.scene_path).exists());
+        // File name is frozen at creation, not renamed.
+        assert!(Path::new(&original_path).exists());
     }
 
     #[test]
@@ -1912,6 +1667,9 @@ mod tests {
             book_dir: book_dir.clone(),
             book_id: "book-1".into(),
             title: title.into(),
+            tags: vec![],
+            characters: vec![],
+            content: "".into(),
         };
 
         let first = create_chapter(input("First")).unwrap();
@@ -1939,6 +1697,9 @@ mod tests {
             book_dir: book_dir.clone(),
             book_id: "book-1".into(),
             title: "Only Chapter".into(),
+            tags: vec![],
+            characters: vec![],
+            content: "".into(),
         })
         .unwrap();
 
@@ -1950,31 +1711,6 @@ mod tests {
     }
 
     #[test]
-    fn moves_a_scene_up_and_down() {
-        let dir = tempfile::tempdir().unwrap();
-        let chapter_dir = dir.path().to_string_lossy().into_owned();
-        let input = |title: &str| CreateSceneInput {
-            chapter_dir: chapter_dir.clone(),
-            chapter_id: "chapter-1".into(),
-            title: title.into(),
-            tags: vec![],
-            characters: vec![],
-            content: "".into(),
-        };
-
-        let first = create_scene(input("First")).unwrap();
-        let second = create_scene(input("Second")).unwrap();
-        assert_eq!(first.scene.order, 1);
-        assert_eq!(second.scene.order, 2);
-
-        move_scene(&chapter_dir, &second.scene.id, MoveDirection::Up).unwrap();
-
-        let listed = list_scenes(&chapter_dir).unwrap().scenes;
-        assert_eq!(listed[0].scene.title, "Second");
-        assert_eq!(listed[1].scene.title, "First");
-    }
-
-    #[test]
     fn move_chapter_fails_when_no_chapter_has_that_id() {
         let dir = tempfile::tempdir().unwrap();
         let book_dir = dir.path().to_string_lossy().into_owned();
@@ -1982,6 +1718,9 @@ mod tests {
             book_dir: book_dir.clone(),
             book_id: "book-1".into(),
             title: "Only Chapter".into(),
+            tags: vec![],
+            characters: vec![],
+            content: "".into(),
         })
         .unwrap();
 
