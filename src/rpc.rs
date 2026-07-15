@@ -1,6 +1,7 @@
 use crate::manuscript::commands::{
     self, CreateBookInput, CreateChapterInput, CreateCharacterInput, CreateLocationInput,
-    CreateNoteInput, CreateSceneInput, CreateSeriesInput, UpdateSceneInput, UpdateSeriesInput,
+    CreateNoteInput, CreateSceneInput, CreateSeriesInput, MoveDirection, RenameSceneInput,
+    UpdateChapterInput, UpdateSceneInput, UpdateSeriesInput,
 };
 use crate::watcher::{self, FileChangeEvent, WatcherState};
 use serde::{Deserialize, Serialize};
@@ -146,6 +147,22 @@ struct DeleteLocationParams {
 struct DeleteNoteParams {
     project_dir: String,
     note_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MoveChapterParams {
+    book_dir: String,
+    chapter_id: String,
+    direction: MoveDirection,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MoveSceneParams {
+    chapter_dir: String,
+    scene_id: String,
+    direction: MoveDirection,
 }
 
 /// Routes one request's `(method, params)` to the matching handler. Kept
@@ -308,6 +325,36 @@ pub fn dispatch(
             let DeleteSceneParams { scene_path } =
                 serde_json::from_value(params).map_err(|e| e.to_string())?;
             commands::delete_scene(&scene_path)?;
+            Ok(Value::Null)
+        }
+        "update_chapter" => {
+            let input: UpdateChapterInput =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let chapter = commands::update_chapter(input)?;
+            serde_json::to_value(chapter).map_err(|e| e.to_string())
+        }
+        "rename_scene" => {
+            let input: RenameSceneInput =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let scene = commands::rename_scene(input)?;
+            serde_json::to_value(scene).map_err(|e| e.to_string())
+        }
+        "move_chapter" => {
+            let MoveChapterParams {
+                book_dir,
+                chapter_id,
+                direction,
+            } = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            commands::move_chapter(&book_dir, &chapter_id, direction)?;
+            Ok(Value::Null)
+        }
+        "move_scene" => {
+            let MoveSceneParams {
+                chapter_dir,
+                scene_id,
+                direction,
+            } = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            commands::move_scene(&chapter_dir, &scene_id, direction)?;
             Ok(Value::Null)
         }
         "start_watching" => {
@@ -656,6 +703,104 @@ mod tests {
         let delete_params = json!({ "scenePath": scene_path });
         assert!(dispatch("delete_scene", delete_params, &watcher_state, &notifier).is_ok());
         assert!(!std::path::Path::new(&scene_path).exists());
+    }
+
+    #[test]
+    fn dispatches_update_chapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "bookDir": dir.path().to_string_lossy(),
+            "bookId": "book-1",
+            "title": "The Obsidian Gate",
+        });
+        let created = dispatch("create_chapter", create_params, &watcher_state, &notifier).unwrap();
+        let chapter_dir = created["chapterDir"].as_str().unwrap().to_string();
+
+        let update_params = json!({ "chapterDir": chapter_dir, "title": "Revised Title" });
+        let updated = dispatch("update_chapter", update_params, &watcher_state, &notifier)
+            .expect("update_chapter should succeed");
+        assert_eq!(updated["title"], "Revised Title");
+    }
+
+    #[test]
+    fn dispatches_rename_scene() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+
+        let create_params = json!({
+            "chapterDir": dir.path().to_string_lossy(),
+            "chapterId": "chapter-1",
+            "title": "The Void Begins",
+        });
+        let created = dispatch("create_scene", create_params, &watcher_state, &notifier).unwrap();
+        let scene_path = created["scenePath"].as_str().unwrap().to_string();
+
+        let rename_params = json!({ "scenePath": scene_path, "title": "Revised Title" });
+        let renamed = dispatch("rename_scene", rename_params, &watcher_state, &notifier)
+            .expect("rename_scene should succeed");
+        assert_eq!(renamed["title"], "Revised Title");
+    }
+
+    #[test]
+    fn dispatches_move_chapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+        let book_dir = dir.path().to_string_lossy().to_string();
+
+        let create =
+            |title: &str| json!({ "bookDir": book_dir, "bookId": "book-1", "title": title });
+        dispatch("create_chapter", create("First"), &watcher_state, &notifier).unwrap();
+        let second = dispatch(
+            "create_chapter",
+            create("Second"),
+            &watcher_state,
+            &notifier,
+        )
+        .unwrap();
+        let second_id = second["chapter"]["id"].as_str().unwrap().to_string();
+
+        let move_params = json!({ "bookDir": book_dir, "chapterId": second_id, "direction": "up" });
+        assert!(dispatch("move_chapter", move_params, &watcher_state, &notifier).is_ok());
+
+        let listed = dispatch(
+            "list_chapters",
+            json!({ "bookDir": book_dir }),
+            &watcher_state,
+            &notifier,
+        )
+        .unwrap();
+        assert_eq!(listed["chapters"][0]["chapter"]["title"], "Second");
+    }
+
+    #[test]
+    fn dispatches_move_scene() {
+        let dir = tempfile::tempdir().unwrap();
+        let watcher_state = WatcherState::default();
+        let notifier = Notifier::default();
+        let chapter_dir = dir.path().to_string_lossy().to_string();
+
+        let create = |title: &str| json!({ "chapterDir": chapter_dir, "chapterId": "chapter-1", "title": title });
+        dispatch("create_scene", create("First"), &watcher_state, &notifier).unwrap();
+        let second = dispatch("create_scene", create("Second"), &watcher_state, &notifier).unwrap();
+        let second_id = second["scene"]["id"].as_str().unwrap().to_string();
+
+        let move_params =
+            json!({ "chapterDir": chapter_dir, "sceneId": second_id, "direction": "up" });
+        assert!(dispatch("move_scene", move_params, &watcher_state, &notifier).is_ok());
+
+        let listed = dispatch(
+            "list_scenes",
+            json!({ "chapterDir": chapter_dir }),
+            &watcher_state,
+            &notifier,
+        )
+        .unwrap();
+        assert_eq!(listed["scenes"][0]["scene"]["title"], "Second");
     }
 
     #[test]
