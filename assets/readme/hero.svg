@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="100%">
+  <!-- Background -->
+  <rect width="1200" height="400" fill="#09090B" rx="12"/>
+  
+  <!-- Subtle Grid -->
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#27272A" stroke-width="0.5" opacity="0.3"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="400" fill="url(#grid)" rx="12"/>
+
+  <!-- Left block: Engine / CLI -->
+  <rect x="80" y="80" width="400" height="240" fill="#111114" rx="8" stroke="#27272A" stroke-width="1"/>
+  <circle cx="104" cy="104" r="6" fill="#27272A"/>
+  <circle cx="124" cy="104" r="6" fill="#27272A"/>
+  <circle cx="144" cy="104" r="6" fill="#27272A"/>
+  <line x1="80" y1="120" x2="480" y2="120" stroke="#27272A" stroke-width="1"/>
+  
+  <text x="100" y="160" fill="#A1A1AA" font-family="monospace" font-size="14">❯ cargo run --bin mythoside-core</text>
+  <text x="100" y="190" fill="#34D399" font-family="monospace" font-size="14">  Starting Mythos engine v0.1.0...</text>
+  <text x="100" y="220" fill="#FAFAFA" font-family="monospace" font-size="14">  Watching /Users/writer/novel</text>
+  <text x="100" y="250" fill="#FAFAFA" font-family="monospace" font-size="14">  Indexed 12 characters, 4 locations.</text>
+  <text x="100" y="280" fill="#60A5FA" font-family="monospace" font-size="14">  Listening on stdin/stdout.</text>
+
+  <!-- Right block: Title & Desc -->
+  <text x="560" y="160" fill="#FAFAFA" font-family="system-ui, sans-serif" font-size="32" font-weight="700">MythosIDE Core</text>
+  <text x="560" y="200" fill="#A1A1AA" font-family="system-ui, sans-serif" font-size="18">The Rust engine powering MythosIDE.</text>
+  <text x="560" y="235" fill="#A1A1AA" font-family="system-ui, sans-serif" font-size="14">Local-first, standalone manuscript data model</text>
+  <text x="560" y="260" fill="#A1A1AA" font-family="system-ui, sans-serif" font-size="14">parsing Markdown+YAML with a JSON-RPC interface.</text>
+  
+  <rect x="560" y="290" width="100" height="28" fill="#FAFAFA" rx="4"/>
+  <text x="610" y="309" fill="#09090B" font-family="system-ui, sans-serif" font-size="13" font-weight="600" text-anchor="middle">Rust</text>
+  <rect x="670" y="290" width="100" height="28" fill="#27272A" rx="4"/>
+  <text x="720" y="309" fill="#FAFAFA" font-family="system-ui, sans-serif" font-size="13" font-weight="600" text-anchor="middle">JSON-RPC</text>
+</svg>
