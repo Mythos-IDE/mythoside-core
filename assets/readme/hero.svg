@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="t d">
-  <title id="t">MythosIDE Core — the Rust engine</title>
-  <desc id="d">MythosIDE Core is a standalone Rust engine that parses and watches your manuscript and speaks JSON-RPC over its own stdin/stdout — it never opens a network port.</desc>
+  <title id="t">Mythos Core — the Rust engine</title>
+  <desc id="d">Mythos Core is a standalone Rust engine that parses and watches your manuscript and speaks JSON-RPC over its own stdin/stdout — it never opens a network port.</desc>
 
   <rect width="1200" height="360" rx="24" fill="#0B0E15"/>
   <rect x="1" y="1" width="1198" height="358" rx="23" fill="none" stroke="#20242f"/>
@@ -9,7 +9,7 @@
   <text x="56" y="50" fill="#C9A24B" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" letter-spacing="3">THE RUST ENGINE BEHIND MYTHOS</text>
   <text x="1144" y="50" text-anchor="end" fill="#7E869A" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" letter-spacing="2">MYTHOS-IDE / CORE</text>
 
-  <text x="56" y="150" fill="#E8DFCB" font-family="Georgia, 'Times New Roman', serif" font-size="58" font-weight="600">MythosIDE Core</text>
+  <text x="56" y="150" fill="#E8DFCB" font-family="Georgia, 'Times New Roman', serif" font-size="58" font-weight="600">Mythos Core</text>
   <text x="58" y="192" fill="#B9B4A4" font-family="Georgia, 'Times New Roman', serif" font-size="21">Parses, watches, and serves your world —</text>
   <text x="58" y="220" fill="#B9B4A4" font-family="Georgia, 'Times New Roman', serif" font-size="21">and never opens a network port.</text>
   <text x="58" y="262" fill="#8b93a3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" letter-spacing="1.5">RUST &#183; MARKDOWN + YAML &#183; JSON-RPC OVER STDIO</text>

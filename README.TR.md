@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="assets/readme/hero.svg" alt="MythosIDE Core Motoru" width="100%" />
+  <img src="assets/readme/hero.svg" alt="Mythos Core Motoru" width="100%" />
 </div>
 
-# MythosIDE Core
+# Mythos Core
 
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](./LICENSE.md)
 [![GitHub Discussions](https://img.shields.io/github/discussions/Mythos-IDE/mythoside-core)](https://github.com/Mythos-IDE/mythoside-core/discussions)
@@ -12,11 +12,11 @@
 
 **Karmaşık dünyalar inşa eden romancılar için geliştirilmiş bir yazar IDE'si.**
 
-MythosIDE; Scrivener gibi araçların yapılandırılmış, uzun soluklu yazma yaklaşımını bir yazılım IDE'sinin akıllı ve bağlam odaklı deneyimiyle birleştirir. Dünyalarını tutarlı tutmak için beş farklı uygulamayı birbirine bağlamaktan yorulmuş fantastik, bilimkurgu ve epik kurgu yazarları için özel olarak tasarlanmıştır.
+Mythos; Scrivener gibi araçların yapılandırılmış, uzun soluklu yazma yaklaşımını bir yazılım IDE'sinin akıllı ve bağlam odaklı deneyimiyle birleştirir. Dünyalarını tutarlı tutmak için beş farklı uygulamayı birbirine bağlamaktan yorulmuş fantastik, bilimkurgu ve epik kurgu yazarları için özel olarak tasarlanmıştır.
 
 > Durum: Erken geliştirme aşaması. Hatalar ve eksiklikler olabilir. Katkı ve geri bildirimleriniz memnuniyetle karşılanır.
 
-## Neden MythosIDE?
+## Neden Mythos?
 
 - **Kurgu için özel yapısal hiyerarşi** — Kendi kendinize yapılandırmak zorunda kaldığınız genel taslak oluşturucuların aksine, yerleşik olarak gelen Seri → Kitap → Bölüm → Sahne hiyerarşisi.
 - **Akıllı dünya inşası** — Taslağınızdan ayrılmadan `@KarakterAdi` yazarak anında bağlamsal bir profil kartı alın.
@@ -25,7 +25,7 @@ MythosIDE; Scrivener gibi araçların yapılandırılmış, uzun soluklu yazma y
 
 ## Repo Yapısı
 
-MythosIDE, biri yerel client biri yerel sunucu olan iki ayrı repo'ya bölünmüştür:
+Mythos, biri yerel client biri yerel sunucu olan iki ayrı repo'ya bölünmüştür:
 
 - **Bu repo (`mythoside-core`)** — motor katmanı. Hiçbir Tauri veya arayüz bağımlılığı olmayan bağımsız bir Rust crate'i (kütüphane + binary): elyazması veri modeli, Markdown+YAML dosya formatı, native dosya izleme, ve entity işlemleri (karakter/sahne vb. oluşturma/okuma/güncelleme/silme). Kendi stdin/stdout'u üzerinden JSON-RPC benzeri bir protokol konuşan küçük bir yerel sunucu process'i olarak çalışır — asla bir ağ portu açmaz, bu yüzden kendisini başlatan process dışında makinedeki hiçbir şey ona erişemez.
 - [`mythoside-ts`](https://github.com/Mythos-IDE/mythoside-ts) — masaüstü client'ı. Bu crate'in binary'sini yönetilen bir "sidecar" process olarak başlatan ve ona proxy yapan bir Tauri + TypeScript uygulaması. Tüm arayüz, editör ve render işi orada gerçekleşir; bu repo'da hiçbiri yok.
@@ -50,9 +50,9 @@ Bu crate, [`mythoside-ts`](https://github.com/Mythos-IDE/mythoside-ts) tarafınd
 
 ## Lisans
 
-MythosIDE, [Functional Source License, v1.1 (ALv2 Future License)](./LICENSE.md) kapsamında kaynak kodları erişilebilir durumdadır. Özetle: Kendi yazma süreçleriniz için uygulamayı özgürce kullanabilir, inceleyebilir, değiştirebilir ve kendi sunucunuzda barındırabilirsiniz; sadece bunu rakip bir ticari ürün veya hizmet olarak yeniden paketleyemezsiniz. Her sürüm, yayınlandıktan iki yıl sonra otomatik olarak Apache 2.0 lisansına dönüşür.
+Mythos, [Functional Source License, v1.1 (ALv2 Future License)](./LICENSE.md) kapsamında kaynak kodları erişilebilir durumdadır. Özetle: Kendi yazma süreçleriniz için uygulamayı özgürce kullanabilir, inceleyebilir, değiştirebilir ve kendi sunucunuzda barındırabilirsiniz; sadece bunu rakip bir ticari ürün veya hizmet olarak yeniden paketleyemezsiniz. Her sürüm, yayınlandıktan iki yıl sonra otomatik olarak Apache 2.0 lisansına dönüşür.
 
-"MythosIDE" ve logosu projenin ticari markalarıdır ve yukarıdaki lisans kapsamında değildir — ayrıntılar için [LICENSE.md](./LICENSE.md) dosyasına bakın.
+"Mythos" ve logosu projenin ticari markalarıdır ve yukarıdaki lisans kapsamında değildir — ayrıntılar için [LICENSE.md](./LICENSE.md) dosyasına bakın.
 
 ## Katkıda Bulunma
 

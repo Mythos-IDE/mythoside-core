@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="assets/readme/hero.svg" alt="MythosIDE Core Engine" width="100%" />
+  <img src="assets/readme/hero.svg" alt="Mythos Core Engine" width="100%" />
 </div>
 
-# MythosIDE Core
+# Mythos Core
 
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](./LICENSE.md)
 [![GitHub Discussions](https://img.shields.io/github/discussions/Mythos-IDE/mythoside-core)](https://github.com/Mythos-IDE/mythoside-core/discussions)
@@ -12,7 +12,7 @@
 
 **A writer's IDE for novelists building complex worlds.**
 
-MythosIDE merges the structured, long-form writing approach of tools like
+Mythos merges the structured, long-form writing approach of tools like
 Scrivener with the intelligent, context-aware experience of a software IDE —
 purpose-built for fantasy, sci-fi, and epic fiction writers who are tired of
 stitching together five different apps to keep their world consistent.
@@ -20,7 +20,7 @@ stitching together five different apps to keep their world consistent.
 > Status: early development. Expect rough edges. Contributions and feedback
 > are very welcome.
 
-## Why MythosIDE?
+## Why Mythos?
 
 - **Structural hierarchy built for fiction** — Series → Book → Chapter →
   Scene, not a generic outliner you have to configure yourself.
@@ -35,7 +35,7 @@ stitching together five different apps to keep their world consistent.
 
 ## Repository layout
 
-MythosIDE is split into a local client and a local server, in two repos:
+Mythos is split into a local client and a local server, in two repos:
 
 - **This repo (`mythoside-core`)** — the engine. A standalone Rust crate
   (library + binary) with no Tauri or UI dependency at all: the manuscript
@@ -77,14 +77,14 @@ where you'd actually run the app. Track progress in
 
 ## License
 
-MythosIDE is source-available under the
+Mythos is source-available under the
 [Functional Source License, v1.1 (ALv2 Future License)](./LICENSE.md). In
 short: you're free to use, read, modify, and self-host it for your own
 writing — you just can't repackage it as a competing commercial product or
 service. Each release converts to Apache 2.0 automatically two years after
 publication.
 
-"MythosIDE" and its logo are trademarks of the project and are not covered by
+"Mythos" and its logo are trademarks of the project and are not covered by
 the license above — see [LICENSE.md](./LICENSE.md) for details.
 
 ## Contributing
