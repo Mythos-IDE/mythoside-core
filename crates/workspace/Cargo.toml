@@ -1,0 +1,20 @@
+[package]
+name = "mythoside-workspace"
+version = "0.1.0"
+edition = "2021"
+description = "Workspace loading, file watching, and document management for MythosIDE core"
+
+[dependencies]
+mythoside-common = { path = "../common" }
+mythoside-narrative = { path = "../narrative" }
+mythoside-parser = { path = "../parser" }
+serde = { version = "1", features = ["derive"] }
+specta = { version = "2.0.0-rc.25", features = ["derive"] }
+uuid = { version = "1.23.5", features = ["serde", "v4"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+notify = "8.2.0"
+dirs = "6.0.0"
+trash = "5.2.6"
+
+[dev-dependencies]
+tempfile = "3.27.0"

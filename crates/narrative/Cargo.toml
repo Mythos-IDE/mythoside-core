@@ -1,0 +1,9 @@
+[package]
+name = "mythoside-narrative"
+version = "0.1.0"
+edition = "2021"
+description = "Narrative domain model for MythosIDE core"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+specta = { version = "2.0.0-rc.25", features = ["derive"] }

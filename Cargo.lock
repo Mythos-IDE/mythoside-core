@@ -318,15 +318,72 @@ dependencies = [
 ]
 
 [[package]]
+name = "mythoside-common"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+]
+
+[[package]]
 name = "mythoside-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "dirs",
+ "mythoside-common",
+ "mythoside-narrative",
+ "mythoside-parser",
+ "mythoside-rpc",
+ "mythoside-workspace",
  "notify",
  "serde",
  "serde_json",
  "serde_norway",
+ "specta",
+ "tempfile",
+ "trash",
+ "uuid",
+]
+
+[[package]]
+name = "mythoside-narrative"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "specta",
+]
+
+[[package]]
+name = "mythoside-parser"
+version = "0.1.0"
+dependencies = [
+ "mythoside-narrative",
+ "serde",
+ "serde_norway",
+]
+
+[[package]]
+name = "mythoside-rpc"
+version = "0.1.0"
+dependencies = [
+ "mythoside-narrative",
+ "mythoside-workspace",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "mythoside-workspace"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "mythoside-common",
+ "mythoside-narrative",
+ "mythoside-parser",
+ "notify",
+ "serde",
  "specta",
  "tempfile",
  "trash",
